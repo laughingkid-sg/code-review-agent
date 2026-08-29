@@ -9,7 +9,7 @@ The agent reviews pull request changes after a developer opens a PR or pushes ne
 - Load target repository config from `.code-review.yml`.
 - Read pull request diffs and changed files.
 - Load markdown rules from `code-review-knowledgebase`.
-- Preserve owner and contributor metadata from knowledgebase rules and generated findings.
+- Preserve contributor metadata in full rule records and keep review payloads compact for model calls.
 - Generate PR-specific PRD/TD summaries as CI artifacts in the implementation repository run.
 - Run code-rule review and business-rule review as separate jobs so they can execute in parallel.
 - Publish GitHub PR comments after dry-run output is approved.
@@ -25,6 +25,10 @@ The agent reviews pull request changes after a developer opens a PR or pushes ne
 - `code-rules`: applies markdown knowledgebase rules to changed code.
 - `business-rules`: summarizes PRD/TD documents and compares implementation behavior against requirements.
 - `aggregate`: combines review artifacts into a single report or PR comment.
+
+## Rule Payloads
+
+The agent keeps full rule metadata for reports and future governance, then builds a compact rule payload for model review. The compact payload keeps `ID`, `Slug`, `Severity`, and check-relevant rule sections. It excludes `Contributor`, `Tags`, and `References` to reduce tokens sent to the model.
 
 ## Required Secrets
 
@@ -42,7 +46,6 @@ PYTHONPATH=src python -m code_review_agent run \
   --config .code-review.yml \
   --repository ../code-review-demo \
   --knowledgebase ../code-review-knowledgebase \
-  --default-owner unassigned \
   --default-contributor codex \
   --output .code-review/artifacts/code-rules-review.md
 ```

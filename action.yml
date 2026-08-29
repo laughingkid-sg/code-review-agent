@@ -24,12 +24,8 @@ inputs:
     description: LLM provider name. Use mock for deterministic dry-runs and qwen for DashScope-backed review.
     required: false
     default: mock
-  default-owner:
-    description: Fallback owner used when a rule or generated finding does not provide one.
-    required: false
-    default: unassigned
   default-contributor:
-    description: Fallback contributor used when a rule or generated finding does not provide one.
+    description: Fallback contributor used when a rule does not provide one.
     required: false
     default: codex
   comment-mode:
@@ -49,6 +45,10 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Install Python dependencies
+      shell: bash
+      run: python -m pip install --disable-pip-version-check "PyYAML>=6.0"
+
     - name: Run dry-run review
       shell: bash
       env:
@@ -67,6 +67,5 @@ runs:
           --repository "${{ inputs.repository-path }}" \
           --knowledgebase "${{ inputs.knowledgebase-path }}" \
           --output "${{ inputs.output-path }}" \
-          --default-owner "${{ inputs.default-owner }}" \
           --default-contributor "${{ inputs.default-contributor }}" \
           "${args[@]}"

@@ -13,9 +13,8 @@ from .rules import Rule
 class Finding:
     title: str
     rule_id: str
+    rule_slug: str
     severity: str
-    owner: str
-    contributor: str
     path: Path | None
     line: int | None
     reasoning: str
@@ -28,11 +27,10 @@ def run_code_rules(
     repository_path: Path,
     changed_files: tuple[Path, ...],
     output_path: Path,
-    default_owner: str,
     default_contributor: str,
 ) -> None:
     files = _review_files(config, repository_path, changed_files)
-    findings = _heuristic_findings(rules, files, default_owner, default_contributor)
+    findings = _heuristic_findings(rules, files)
     lines = [
         "# Code Rules Review",
         "",
@@ -43,7 +41,7 @@ def run_code_rules(
     ]
     if rules:
         lines.extend(
-            f"- `{rule.id}` {rule.title} ({rule.layer}; owner: {rule.owner or default_owner}; contributor: {rule.contributor or default_contributor})"
+            f"- `{rule.id}` `{rule.slug}` {rule.title} ({rule.layer}; severity: {rule.severity}; contributor: {rule.contributor or default_contributor})"
             for rule in rules
         )
     else:
@@ -64,9 +62,8 @@ def run_code_rules(
                     f"### {finding.title}",
                     "",
                     f"- Rule: `{finding.rule_id}`",
+                    f"- Slug: `{finding.rule_slug}`",
                     f"- Severity: `{finding.severity}`",
-                    f"- Owner: `{finding.owner}`",
-                    f"- Contributor: `{finding.contributor}`",
                     f"- Location: `{location}`",
                     f"- Reasoning: {finding.reasoning}",
                     f"- Recommendation: {finding.recommendation}",
@@ -126,24 +123,19 @@ def _review_files(config: ReviewConfig, repository_path: Path, changed_files: tu
     return tuple(files)
 
 
-def _heuristic_findings(
-    rules: tuple[Rule, ...],
-    files: tuple[Path, ...],
-    default_owner: str,
-    default_contributor: str,
-) -> tuple[Finding, ...]:
+def _heuristic_findings(rules: tuple[Rule, ...], files: tuple[Path, ...]) -> tuple[Finding, ...]:
     rule_map = {rule.id: rule for rule in rules}
     findings: list[Finding] = []
     decode_rule = rule_map.get("GO-DEMO-PROJ-001")
     if decode_rule:
-        findings.extend(_request_decode_findings(decode_rule, files, default_owner, default_contributor))
+        findings.extend(_request_decode_findings(decode_rule, files))
     error_rule = rule_map.get("GO-COM-001")
     if error_rule:
-        findings.extend(_generic_error_findings(error_rule, files, default_owner, default_contributor))
+        findings.extend(_generic_error_findings(error_rule, files))
     return tuple(findings)
 
 
-def _request_decode_findings(rule: Rule, files: tuple[Path, ...], default_owner: str, default_contributor: str) -> tuple[Finding, ...]:
+def _request_decode_findings(rule: Rule, files: tuple[Path, ...]) -> tuple[Finding, ...]:
     findings: list[Finding] = []
     pattern = re.compile(r"if\s+err\s*:=\s*(?:.*Decode|.*ShouldBindJSON|.*Atoi|.*Parse).+err\s*!=")
     for path in files:
@@ -161,9 +153,8 @@ def _request_decode_findings(rule: Rule, files: tuple[Path, ...], default_owner:
                     Finding(
                         title="Handler continues after request parsing failure",
                         rule_id=rule.id,
-                        severity=rule.metadata.get("severity", "high"),
-                        owner=rule.owner or default_owner,
-                        contributor=rule.contributor or default_contributor,
+                        rule_slug=rule.slug,
+                        severity=rule.severity,
                         path=path,
                         line=index + 1,
                         reasoning="The handler detects an invalid request but the nearby error branch does not return before execution can continue.",
@@ -173,7 +164,7 @@ def _request_decode_findings(rule: Rule, files: tuple[Path, ...], default_owner:
     return tuple(findings)
 
 
-def _generic_error_findings(rule: Rule, files: tuple[Path, ...], default_owner: str, default_contributor: str) -> tuple[Finding, ...]:
+def _generic_error_findings(rule: Rule, files: tuple[Path, ...]) -> tuple[Finding, ...]:
     findings: list[Finding] = []
     pattern = re.compile(r"errors\.New\(\"(?:failed|error|invalid)\"\)")
     for path in files:
@@ -183,9 +174,8 @@ def _generic_error_findings(rule: Rule, files: tuple[Path, ...], default_owner: 
                     Finding(
                         title="Generic error message loses context",
                         rule_id=rule.id,
-                        severity=rule.metadata.get("severity", "medium"),
-                        owner=rule.owner or default_owner,
-                        contributor=rule.contributor or default_contributor,
+                        rule_slug=rule.slug,
+                        severity=rule.severity,
                         path=path,
                         line=index,
                         reasoning="A generic error string makes it harder to identify the failed operation during review or incident debugging.",

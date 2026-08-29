@@ -18,7 +18,6 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--repository", default=".")
     run_parser.add_argument("--knowledgebase", default="../code-review-knowledgebase")
     run_parser.add_argument("--output", required=True)
-    run_parser.add_argument("--default-owner", default="unassigned")
     run_parser.add_argument("--default-contributor", default="codex")
     run_parser.add_argument("--changed-file", action="append", default=[])
 
@@ -44,7 +43,6 @@ def _run(args: argparse.Namespace) -> int:
             repository_path=repository_path,
             changed_files=changed_files,
             output_path=output_path,
-            default_owner=args.default_owner,
             default_contributor=args.default_contributor,
         )
     elif args.mode == "business-rules":

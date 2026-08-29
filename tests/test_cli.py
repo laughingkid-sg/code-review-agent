@@ -119,13 +119,14 @@ github:
 def _project_rule() -> str:
     return """# Demo Project Go Rules
 
-## GO-DEMO-PROJ-001: Do not continue after request binding or decode failures
+## [Do not continue after request binding or decode failures](#stop-after-request-binding-failure)
 
 | Field | Value |
 | --- | --- |
-| Owner | `demo-project` |
-| Contributor | `codex` |
-| Severity | `high` |
+| ID | `GO-DEMO-PROJ-001` |
+| Slug | `stop-after-request-binding-failure` |
+| Contributor | `example@gmail.com` |
+| Severity | `P1` |
 
 ### Rule
 
