@@ -2,7 +2,7 @@
 
 Reusable Python agent and composite GitHub Action for the intelligent code review demo.
 
-The agent runs after a developer opens a pull request or pushes new commits to an existing pull request. It does not create PRs. It reads repository configuration, changed files, PRD/TDD documents, and markdown rules, then writes review artifacts and publishes managed GitHub PR comments.
+The agent runs after a developer opens a pull request or pushes new commits to an existing pull request. It does not create PRs. It reads repository configuration, changed files, PRD/TDD documents, and markdown rules, then writes review artifacts, publishes exact-line GitHub PR review comments, and maintains one lightweight artifact-links comment.
 
 ## Repository Role
 
@@ -11,7 +11,7 @@ The agent runs after a developer opens a pull request or pushes new commits to a
 - Run code-rule, business-rule, and aggregate review modes.
 - Keep full rule records for reporting while sending compact payloads to the LLM.
 - Write provider request/response transcripts to `output/`.
-- Publish managed summary comments and exact-line inline PR review comments.
+- Publish exact-line inline PR review comments and a lightweight artifact-links PR comment.
 
 ## Non-Responsibilities
 
@@ -36,7 +36,7 @@ flowchart TD
   BizSkill --> Provider
   Provider --> Findings[findings.py structured finding parser]
   Findings --> CommentSkill
-  CommentSkill --> GitHub[github.py PR comments and stale cleanup]
+  CommentSkill --> GitHub[github.py inline comments, artifact links, and stale cleanup]
   Provider --> Audit[audit.py transcripts]
 ```
 
@@ -54,9 +54,9 @@ sequenceDiagram
   Skill->>LLM: Send review context when provider is enabled
   LLM-->>Skill: Return findings with corrected snippets
   Skill->>CLI: Write markdown artifact
-  CLI->>GH: Post/update managed summary comment
   CLI->>GH: Post/update inline comments for code/business findings
   CLI->>GH: Delete stale generated inline comments for that mode
+  CLI->>GH: Post/update artifact links comment in aggregate mode
 ```
 
 ## Modes
@@ -65,11 +65,11 @@ sequenceDiagram
 | --- | --- | --- |
 | `code-rules` | Review changed code against markdown coding rules from the knowledgebase. | Yes |
 | `business-rules` | Summarize affected PRD/TDD documents and review implementation logic against them. | Yes |
-| `aggregate` | Combine code-rule and business-rule artifacts into a final PR summary. | No, summary only |
+| `aggregate` | Combine code-rule and business-rule artifacts, then publish a lightweight artifact-links comment. | No, artifact links only |
 
 ## AI Skill
 
-The reusable AI Skill lives at `skills/intelligent-code-review/SKILL.md`. It captures the generic review workflow for another Codex run: provider-agnostic LLM setup, markdown knowledge rules, PRD/TD business context, exact-line comments, managed summaries, artifacts, and stale generated comment cleanup.
+The reusable AI Skill lives at `skills/intelligent-code-review/SKILL.md`. It captures the generic review workflow for another Codex run: provider-agnostic LLM setup, markdown knowledge rules, PRD/TD business context, exact-line comments, artifact links, artifacts, and stale generated comment cleanup.
 
 ## Action Inputs
 
@@ -86,6 +86,7 @@ The reusable AI Skill lives at `skills/intelligent-code-review/SKILL.md`. It cap
 | `audit-dir` | Directory for provider transcripts. |
 | `summary-cache-ttl-days` | Freshness window for PRD/TDD summary cache. |
 | `aggregate-inputs` | Newline-separated artifacts to combine in aggregate mode. |
+| `artifact-links` | Newline-separated `label|url` links for the aggregate artifact-links PR comment. |
 | `pull-request-number` | PR number override for non-PR events such as `workflow_run`. |
 | `head-sha` | Head SHA override for non-PR events such as `workflow_run`. |
 
@@ -100,7 +101,7 @@ The current demo uses an OpenAI-compatible LLM provider. Alibaba Model Studio/Qw
 
 ## Findings and Comments
 
-The agent asks provider-backed reviews for a JSON object with `findings[]`, parses those records into structured `ReviewFinding` values, then renders markdown artifacts and GitHub comments from the parsed data. Markdown parsing is kept only as a compatibility fallback for older artifacts.
+The agent asks provider-backed reviews for a JSON object with `findings[]`, parses those records into structured `ReviewFinding` values, then renders markdown artifacts and exact-line GitHub comments from the parsed data. Markdown parsing is kept only as a compatibility fallback for older artifacts.
 
 Inline comments include:
 
@@ -112,6 +113,8 @@ Inline comments include:
 - direct link to the changed line.
 
 Generated inline comments include hidden markers. On rerun, the agent updates matching generated comments and deletes stale generated comments for the same review mode.
+
+Full review markdown, PRD/TDD summaries, and LLM transcripts are not posted as long PR summary comments. They are uploaded as GitHub Actions artifacts and linked from the aggregate artifact-links comment.
 
 ## Future Improvements
 
