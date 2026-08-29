@@ -47,7 +47,7 @@ runs:
   steps:
     - name: Install Python dependencies
       shell: bash
-      run: python -m pip install --disable-pip-version-check "PyYAML>=6.0"
+      run: python -m pip install --disable-pip-version-check "certifi>=2024.8.30" "PyYAML>=6.0"
 
     - name: Run dry-run review
       shell: bash
