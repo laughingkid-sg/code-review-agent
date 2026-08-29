@@ -36,6 +36,10 @@ inputs:
     description: Newline-separated changed file paths relative to the target repository.
     required: false
     default: ""
+  audit-dir:
+    description: Directory where provider request/response transcripts are written.
+    required: false
+    default: output
 
 outputs:
   review-output:
@@ -67,5 +71,7 @@ runs:
           --repository "${{ inputs.repository-path }}" \
           --knowledgebase "${{ inputs.knowledgebase-path }}" \
           --output "${{ inputs.output-path }}" \
+          --provider "${{ inputs.provider }}" \
+          --audit-dir "${{ inputs.audit-dir }}" \
           --default-contributor "${{ inputs.default-contributor }}" \
           "${args[@]}"
