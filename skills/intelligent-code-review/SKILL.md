@@ -25,6 +25,7 @@ Use this skill for the reusable review system made of an implementation repo, `c
 ## Comment Outputs
 
 - Prefer exact-line GitHub PR review comments for actionable findings. Keep each comment tied to the changed line that caused the finding.
+- For provider-backed findings, request structured JSON first and parse it into the internal finding model before rendering markdown artifacts or comments.
 - Include a linked title using the rule slug when available, `RuleID`, `Severity` (`P0` highest through `P3` lowest), reasoning, recommendation, and a corrected code snippet when the fix is clear.
 - Use managed hidden markers so reruns update or delete generated comments instead of piling up duplicates.
 - Upload markdown review artifacts and LLM request/response transcripts for debugging and study.

@@ -11,6 +11,7 @@ from ..review import run_business_rules
 def run(
     *,
     config: ReviewConfig,
+    repository_path: Path,
     changed_files: tuple[Path, ...],
     output_path: Path,
     provider: OpenAICompatibleProvider | None,
@@ -19,6 +20,7 @@ def run(
 ) -> None:
     run_business_rules(
         config=config,
+        repository_path=repository_path,
         changed_files=changed_files,
         output_path=output_path,
         provider=provider,
