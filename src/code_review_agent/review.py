@@ -8,6 +8,7 @@ import time
 from .audit import AuditRecorder
 from .config import DocumentSet, ReviewConfig
 from .documents import DocumentSummary, affected_document_sets, build_document_summary, write_document_summary
+from .findings import ReviewFinding, parse_review_findings
 from .providers import ChatMessage, OpenAICompatibleProvider
 from .rules import Rule, compact_review_payload
 
@@ -157,28 +158,44 @@ def _cached_summary_is_fresh(summary: DocumentSummary, ttl_days: int) -> bool:
 
 
 def run_aggregate(output_path: Path, input_paths: tuple[Path, ...] = ()) -> None:
+    existing_inputs = tuple(path for path in input_paths if path.exists())
+    findings_by_input = tuple((path, parse_review_findings(path.read_text(encoding="utf-8"), Path.cwd())) for path in existing_inputs)
     lines = [
         "# Aggregated Review",
         "",
         "This summary combines the generated code-rule and business-rule review artifacts for the PR.",
         "",
-        "## Inputs",
+        "## Summary",
         "",
+        "| Artifact | Findings |",
+        "| --- | ---: |",
     ]
-    existing_inputs = tuple(path for path in input_paths if path.exists())
-    if existing_inputs:
-        lines.extend(f"- `{path}`" for path in existing_inputs)
+    if findings_by_input:
+        lines.extend(f"| `{path.name}` | {len(findings)} |" for path, findings in findings_by_input)
     else:
-        lines.append("- No review artifacts were provided.")
+        lines.append("| No review artifacts provided | 0 |")
 
     lines.extend(["", "## Combined Findings", ""])
-    if existing_inputs:
-        for path in existing_inputs:
-            lines.extend([f"### {path.name}", "", _read_text_budget(path, 12000), ""])
+    if findings_by_input:
+        for path, findings in findings_by_input:
+            lines.extend([f"### {path.name}", ""])
+            if findings:
+                lines.extend(_aggregate_finding_lines(finding) for finding in findings)
+                lines.append("")
+            else:
+                lines.extend(["- No parsed findings.", ""])
     else:
         lines.append("No review artifacts were available to aggregate.")
 
     _write_output(output_path, lines)
+
+
+def _aggregate_finding_lines(finding: ReviewFinding) -> str:
+    location = f"{finding.path}:{finding.line}" if finding.path and finding.line else "repository"
+    rule = f" `{finding.rule_id}`" if finding.rule_id else ""
+    slug = f" `{finding.slug}`" if finding.slug else ""
+    recommendation = f" Recommendation: {finding.recommendation}" if finding.recommendation else ""
+    return f"- `{finding.severity}`{rule}{slug} {finding.title} at `{location}`.{recommendation}"
 
 
 def _review_files(config: ReviewConfig, repository_path: Path, changed_files: tuple[Path, ...]) -> tuple[Path, ...]:
