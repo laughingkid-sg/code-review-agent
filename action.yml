@@ -21,7 +21,7 @@ inputs:
     description: Markdown output path for review findings.
     required: true
   provider:
-    description: LLM provider name. Use mock for deterministic dry-runs and qwen for DashScope-backed review.
+    description: LLM provider name. Use mock for deterministic dry-runs or llm for OpenAI-compatible review. qwen remains a backwards-compatible alias.
     required: false
     default: mock
   default-contributor:

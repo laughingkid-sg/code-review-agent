@@ -25,14 +25,14 @@ The agent runs after a developer opens a pull request or pushes new commits to a
 flowchart TD
   Action[action.yml composite action] --> CLI[cli.py]
   CLI --> Config[config.py]
-  CLI --> Skills[skills package]
-  Skills --> CodeSkill[code_rules skill]
-  Skills --> BizSkill[business_rules skill]
-  Skills --> AggSkill[aggregation skill]
-  Skills --> CommentSkill[github_comments skill]
+  CLI --> Skills[internal Python skills package]
+  Skills --> CodeSkill[code_rules module]
+  Skills --> BizSkill[business_rules module]
+  Skills --> AggSkill[aggregation module]
+  Skills --> CommentSkill[github_comments module]
   CodeSkill --> Rules[rules.py compact KB payload]
   BizSkill --> Docs[documents.py PRD/TDD summaries]
-  CodeSkill --> Provider[providers.py OpenAI-compatible Qwen]
+  CodeSkill --> Provider[providers.py OpenAI-compatible LLM]
   BizSkill --> Provider
   Provider --> Findings[findings.py structured finding parser]
   Findings --> CommentSkill
@@ -47,7 +47,7 @@ sequenceDiagram
   participant Workflow as GitHub workflow
   participant CLI as code_review_agent CLI
   participant Skill as Review skill
-  participant LLM as Qwen compatible API
+  participant LLM as OpenAI-compatible LLM API
   participant GH as GitHub API
   Workflow->>CLI: Run mode with config, changed files, and output path
   CLI->>Skill: Dispatch to code, business, or aggregate skill
@@ -67,6 +67,10 @@ sequenceDiagram
 | `business-rules` | Summarize affected PRD/TDD documents and review implementation logic against them. | Yes |
 | `aggregate` | Combine code-rule and business-rule artifacts into a final PR summary. | No, summary only |
 
+## AI Skill
+
+The reusable AI Skill lives at `skills/intelligent-code-review/SKILL.md`. It captures the generic review workflow for another Codex run: provider-agnostic LLM setup, markdown knowledge rules, PRD/TD business context, exact-line comments, managed summaries, artifacts, and stale generated comment cleanup.
+
 ## Action Inputs
 
 | Input | Purpose |
@@ -76,7 +80,7 @@ sequenceDiagram
 | `repository-path` | Target implementation repository checkout path. |
 | `knowledgebase-path` | Checked-out `code-review-knowledgebase` path. |
 | `output-path` | Markdown artifact to write. |
-| `provider` | `mock` or `qwen`. |
+| `provider` | `mock` or `llm`; `qwen` is accepted as a backwards-compatible alias. |
 | `comment-mode` | `dry_run` or `pr_comment`. |
 | `changed-files` | Newline-separated changed file paths. |
 | `audit-dir` | Directory for provider transcripts. |
@@ -87,7 +91,7 @@ sequenceDiagram
 
 ## Provider Configuration
 
-The current demo uses Alibaba Model Studio through an OpenAI-compatible API endpoint.
+The current demo uses an OpenAI-compatible LLM provider. Alibaba Model Studio/Qwen is one compatible configuration, not a required architecture choice.
 
 - `OPENAI_API_KEY`: required provider key.
 - `OPENAI_BASE_URL`: OpenAI-compatible base URL.
@@ -116,4 +120,4 @@ Generated inline comments include hidden markers. On rerun, the agent updates ma
 - Analyze rule effectiveness, false positives, resolved findings, unresolved findings, consumption rate, and non-consumption rate from Hive.
 - Add richer aggregation that clusters duplicate code-rule and business-rule findings.
 - Add integrations for Slack, Lark, or Teams notifications after review completion.
-- Package the internal skill modules as externally reusable Codex skills if local developer workflows become a requirement.
+- Extend the reusable AI Skill in `skills/intelligent-code-review/` as the workflow generalizes beyond the demo.
