@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--comment-mode", choices=("dry_run", "pr_comment"), default="dry_run")
     run_parser.add_argument("--summary-cache-ttl-days", type=int, default=3)
     run_parser.add_argument("--aggregate-input", action="append", default=[])
+    run_parser.add_argument("--artifact-link", action="append", default=[])
 
     smoke_parser = subparsers.add_parser("smoke-provider", help="Run a small OpenAI-compatible provider smoke test.")
     smoke_parser.add_argument("--env-file", default=".env")
@@ -89,6 +90,7 @@ def _run(args: argparse.Namespace) -> int:
             output_path=output_path,
             repository_path=repository_path,
             comment_mode=args.comment_mode,
+            artifact_links=tuple(args.artifact_link),
         )
     except GitHubError as exc:
         print(f"GitHub comment publishing failed: {exc}")

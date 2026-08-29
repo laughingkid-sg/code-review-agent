@@ -7,18 +7,24 @@ from unittest.mock import patch
 from code_review_agent.github import (
     GitHubContext,
     GitHubPullRequestCommenter,
+    build_artifact_links_comment,
     build_inline_review_comments,
-    build_review_comment,
 )
 
 
 class GitHubCommentTest(unittest.TestCase):
-    def test_build_review_comment_adds_stable_marker(self) -> None:
-        marker, body = build_review_comment("code-rules", Path(".code-review/review.md"), "# Findings")
+    def test_build_artifact_links_comment_adds_stable_marker_and_links(self) -> None:
+        marker, body = build_artifact_links_comment(
+            (
+                "Code Rules Review|https://github.example/owner/repo/actions/runs/1",
+                "Business Rules Review|https://github.example/owner/repo/actions/runs/2",
+            )
+        )
 
-        self.assertEqual(marker, "<!-- code-review-agent:code-rules -->")
-        self.assertIn("## Code Rules Review", body)
-        self.assertIn("# Findings", body)
+        self.assertEqual(marker, "<!-- code-review-agent:artifact-links -->")
+        self.assertIn("## Code Review Artifacts", body)
+        self.assertIn("| Code Rules Review | [Open](https://github.example/owner/repo/actions/runs/1) |", body)
+        self.assertIn("Full review reasoning and LLM transcripts are kept in CI artifacts", body)
 
     def test_publish_creates_comment_when_marker_is_missing(self) -> None:
         calls: list[tuple[str, str, dict | None]] = []
@@ -43,6 +49,18 @@ class GitHubCommentTest(unittest.TestCase):
         self.assertEqual(calls[-1][0], "PATCH")
         self.assertEqual(calls[-1][1], "https://api.github.test/comment/1")
         self.assertIn("new", calls[-1][2]["body"])
+
+    def test_delete_removes_existing_comment_with_marker(self) -> None:
+        calls: list[tuple[str, str, dict | None]] = []
+        comments = [{"body": "old\n<!-- marker -->", "url": "https://api.github.test/comment/1"}]
+        commenter = GitHubPullRequestCommenter(_context())
+
+        with patch("code_review_agent.github.request.urlopen", side_effect=_fake_urlopen(calls, [comments])):
+            deleted = commenter.delete("<!-- marker -->")
+
+        self.assertTrue(deleted)
+        self.assertEqual(calls[-1][0], "DELETE")
+        self.assertEqual(calls[-1][1], "https://api.github.test/comment/1")
 
     def test_build_inline_review_comments_parses_provider_findings(self) -> None:
         body = """# Findings

@@ -13,7 +13,7 @@ Use this skill for the reusable review system made of an implementation repo, `c
 
 - Treat the developer-authored pull request as already existing. The workflows run when a PR targeting the main branch is opened, reopened, or receives new commits.
 - Keep execution code in `code-review-agent`; keep coding-rule knowledge in `code-review-knowledgebase`; keep PRD/TD documents, generated summaries, workflow config, and artifacts in the implementation repo.
-- Run code-rule review and business-rule review as separate workflows so they can execute in parallel. Aggregate their artifacts afterward into one final managed PR summary.
+- Run code-rule review and business-rule review as separate workflows so they can execute in parallel. Aggregate their artifacts afterward and publish only a lightweight artifact-links PR comment.
 - Describe the model integration generically as an OpenAI-compatible LLM provider. Specific model names such as Qwen are configuration details.
 
 ## Review Inputs
@@ -27,6 +27,7 @@ Use this skill for the reusable review system made of an implementation repo, `c
 - Prefer exact-line GitHub PR review comments for actionable findings. Keep each comment tied to the changed line that caused the finding.
 - For provider-backed findings, request structured JSON first and parse it into the internal finding model before rendering markdown artifacts or comments.
 - Include a linked title using the rule slug when available, `RuleID`, `Severity` (`P0` highest through `P3` lowest), reasoning, recommendation, and a corrected code snippet when the fix is clear.
+- Do not post long code-rule, business-rule, or aggregate finding summaries as PR conversation comments. Keep full reasoning in Actions artifacts and expose it through artifact links.
 - Use managed hidden markers so reruns update or delete generated comments instead of piling up duplicates.
 - Upload markdown review artifacts and LLM request/response transcripts for debugging and study.
 

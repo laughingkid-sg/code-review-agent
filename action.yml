@@ -48,6 +48,10 @@ inputs:
     description: Newline-separated review artifact paths to combine in aggregate mode.
     required: false
     default: ""
+  artifact-links:
+    description: Newline-separated artifact links formatted as label|url for the aggregate PR comment.
+    required: false
+    default: ""
   pull-request-number:
     description: Pull request number override for non-pull_request events such as workflow_run.
     required: false
@@ -89,6 +93,12 @@ runs:
             aggregate_args+=(--aggregate-input "$aggregate_input")
           fi
         done <<< "${{ inputs.aggregate-inputs }}"
+        artifact_link_args=()
+        while IFS= read -r artifact_link; do
+          if [ -n "$artifact_link" ]; then
+            artifact_link_args+=(--artifact-link "$artifact_link")
+          fi
+        done <<< "${{ inputs.artifact-links }}"
 
         python -m code_review_agent run \
           --mode "${{ inputs.mode }}" \
@@ -102,4 +112,5 @@ runs:
           --summary-cache-ttl-days "${{ inputs.summary-cache-ttl-days }}" \
           --default-contributor "${{ inputs.default-contributor }}" \
           "${args[@]}" \
-          "${aggregate_args[@]}"
+          "${aggregate_args[@]}" \
+          "${artifact_link_args[@]}"
