@@ -7,6 +7,60 @@ import re
 from typing import Any
 
 
+REVIEW_FINDINGS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "rule_id": {"type": "string"},
+                    "slug": {"type": "string"},
+                    "severity": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
+                    "file": {"type": "string"},
+                    "line": {"type": "integer"},
+                    "reasoning": {"type": "string"},
+                    "recommendation": {"type": "string"},
+                    "corrected_code": {"type": "string"},
+                    "language": {"type": "string"},
+                },
+                "required": [
+                    "title",
+                    "rule_id",
+                    "slug",
+                    "severity",
+                    "file",
+                    "line",
+                    "reasoning",
+                    "recommendation",
+                    "corrected_code",
+                    "language",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["findings"],
+    "additionalProperties": False,
+}
+
+
+def review_findings_response_format(mode: str = "json_schema") -> dict[str, Any]:
+    if mode == "json_object":
+        return {"type": "json_object"}
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "review_findings",
+            "description": "Actionable code review findings tied to repository-relative files and exact line numbers.",
+            "schema": REVIEW_FINDINGS_JSON_SCHEMA,
+            "strict": True,
+        },
+    }
+
+
 @dataclass(frozen=True)
 class ReviewFinding:
     title: str

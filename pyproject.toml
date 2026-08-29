@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Deterministic dry-run engine for the intelligent code review demo."
 requires-python = ">=3.11"
 dependencies = [
-  "certifi>=2024.8.30",
+  "openai>=1.40.0",
   "PyYAML>=6.0",
 ]
 
