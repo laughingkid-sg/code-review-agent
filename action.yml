@@ -13,6 +13,10 @@ inputs:
     description: Path to the checked-out code-review-knowledgebase repository.
     required: false
     default: ../code-review-knowledgebase
+  repository-path:
+    description: Path to the target implementation repository.
+    required: false
+    default: .
   output-path:
     description: Markdown output path for review findings.
     required: true
@@ -32,6 +36,10 @@ inputs:
     description: Use dry_run to write artifacts only, or pr_comment to publish GitHub PR comments.
     required: false
     default: dry_run
+  changed-files:
+    description: Newline-separated changed file paths relative to the target repository.
+    required: false
+    default: ""
 
 outputs:
   review-output:
@@ -41,27 +49,24 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Validate action contract
+    - name: Run dry-run review
       shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}/src
       run: |
-        echo "code-review-agent action contract"
-        echo "mode=${{ inputs.mode }}"
-        echo "config-path=${{ inputs.config-path }}"
-        echo "knowledgebase-path=${{ inputs.knowledgebase-path }}"
-        echo "output-path=${{ inputs.output-path }}"
-        echo "provider=${{ inputs.provider }}"
-        echo "default-owner=${{ inputs.default-owner }}"
-        echo "default-contributor=${{ inputs.default-contributor }}"
-        echo "comment-mode=${{ inputs.comment-mode }}"
-        mkdir -p "$(dirname "${{ inputs.output-path }}")"
-        {
-          echo "# Code Review Agent"
-          echo
-          echo "Action contract validation completed."
-          echo
-          echo "- Mode: ${{ inputs.mode }}"
-          echo "- Provider: ${{ inputs.provider }}"
-          echo "- Default owner: ${{ inputs.default-owner }}"
-          echo "- Default contributor: ${{ inputs.default-contributor }}"
-          echo "- Comment mode: ${{ inputs.comment-mode }}"
-        } > "${{ inputs.output-path }}"
+        args=()
+        while IFS= read -r changed_file; do
+          if [ -n "$changed_file" ]; then
+            args+=(--changed-file "$changed_file")
+          fi
+        done <<< "${{ inputs.changed-files }}"
+
+        python -m code_review_agent run \
+          --mode "${{ inputs.mode }}" \
+          --config "${{ inputs.config-path }}" \
+          --repository "${{ inputs.repository-path }}" \
+          --knowledgebase "${{ inputs.knowledgebase-path }}" \
+          --output "${{ inputs.output-path }}" \
+          --default-owner "${{ inputs.default-owner }}" \
+          --default-contributor "${{ inputs.default-contributor }}" \
+          "${args[@]}"

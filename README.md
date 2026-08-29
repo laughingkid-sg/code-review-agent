@@ -20,7 +20,7 @@ The agent reviews pull request changes after a developer opens a PR or pushes ne
 - Own product or technical requirement source documents.
 - Replace manual developer PR creation.
 
-## Planned Modes
+## Modes
 
 - `code-rules`: applies markdown knowledgebase rules to changed code.
 - `business-rules`: summarizes PRD/TD documents and compares implementation behavior against requirements.
@@ -32,16 +32,28 @@ The agent reviews pull request changes after a developer opens a PR or pushes ne
 - `GITHUB_TOKEN`: provided by GitHub Actions for PR metadata and comments.
 - `KNOWLEDGEBASE_REPO_TOKEN`: optional, only needed if the knowledgebase repo is private and cannot be checked out with the default token.
 
-## Local Dry-Run Shape
+## Local Dry-Run
 
-The Python CLI will support a command similar to:
+Run from a local checkout:
 
 ```bash
-python -m code_review_agent run \
+PYTHONPATH=src python -m code_review_agent run \
   --mode code-rules \
   --config .code-review.yml \
+  --repository ../code-review-demo \
   --knowledgebase ../code-review-knowledgebase \
   --default-owner unassigned \
   --default-contributor codex \
   --output .code-review/artifacts/code-rules-review.md
+```
+
+For business-rule dry-runs:
+
+```bash
+PYTHONPATH=src python -m code_review_agent run \
+  --mode business-rules \
+  --config .code-review.yml \
+  --repository ../code-review-demo \
+  --knowledgebase ../code-review-knowledgebase \
+  --output .code-review/artifacts/business-rules-review.md
 ```
