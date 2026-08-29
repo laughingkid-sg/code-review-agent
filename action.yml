@@ -61,6 +61,7 @@ runs:
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/src
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         args=()
         while IFS= read -r changed_file; do
@@ -77,6 +78,7 @@ runs:
           --output "${{ inputs.output-path }}" \
           --provider "${{ inputs.provider }}" \
           --audit-dir "${{ inputs.audit-dir }}" \
+          --comment-mode "${{ inputs.comment-mode }}" \
           --summary-cache-ttl-days "${{ inputs.summary-cache-ttl-days }}" \
           --default-contributor "${{ inputs.default-contributor }}" \
           "${args[@]}"
