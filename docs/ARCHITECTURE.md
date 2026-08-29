@@ -17,6 +17,10 @@ Two review jobs can run during the same pull request event:
 
 Both jobs run after the developer opens a PR or pushes new commits to the PR.
 
+## Ownership Metadata
+
+Rules and generated findings should carry `owner` and `contributor` metadata. Rule metadata comes from the knowledgebase. Agent-generated findings should preserve those values when a finding comes from a rule, or apply action defaults when the source does not provide them.
+
 ## Artifact Ownership
 
 Generated summaries and review reports belong to the implementation repository CI run. They should be uploaded as GitHub Actions artifacts and may also be written to `.code-review/artifacts` during local dry-runs.
