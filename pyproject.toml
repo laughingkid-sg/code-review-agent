@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "code-review-agent"
+version = "0.2.0"
+description = "Deterministic dry-run engine for the intelligent code review demo."
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6.0",
+]
+
+[project.scripts]
+code-review-agent = "code_review_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

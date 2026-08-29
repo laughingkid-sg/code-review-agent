@@ -17,9 +17,9 @@ Two review jobs can run during the same pull request event:
 
 Both jobs run after the developer opens a PR or pushes new commits to the PR.
 
-## Ownership Metadata
+## Contributor Metadata
 
-Rules and generated findings should carry `owner` and `contributor` metadata. Rule metadata comes from the knowledgebase. Agent-generated findings should preserve those values when a finding comes from a rule, or apply action defaults when the source does not provide them.
+Rules should carry `contributor` metadata in full records. Rule metadata comes from the knowledgebase. Findings and comments should retain ID, slug, and severity as the key rule references. LLM-facing rule payloads should exclude contributor, tags, and references to reduce tokens.
 
 ## Artifact Ownership
 
