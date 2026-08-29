@@ -6,7 +6,13 @@ from pathlib import Path
 from .audit import AuditRecorder
 from .config import load_config
 from .env import load_env_file
-from .github import GitHubContext, GitHubError, GitHubPullRequestCommenter, build_review_comment
+from .github import (
+    GitHubContext,
+    GitHubError,
+    GitHubPullRequestCommenter,
+    build_inline_review_comments,
+    build_review_comment,
+)
 from .providers import ChatMessage, OpenAICompatibleProvider, ProviderError
 from .review import run_aggregate, run_business_rules, run_code_rules
 from .rules import load_rules
@@ -81,7 +87,7 @@ def _run(args: argparse.Namespace) -> int:
     elif args.mode == "aggregate":
         run_aggregate(output_path=output_path)
     try:
-        _publish_comment(args, output_path)
+        _publish_comment(args, output_path, repository_path)
     except GitHubError as exc:
         print(f"GitHub comment publishing failed: {exc}")
         return 1
@@ -102,13 +108,17 @@ def _provider_from_args(args: argparse.Namespace, repository_path: Path) -> Open
     return OpenAICompatibleProvider.from_env()
 
 
-def _publish_comment(args: argparse.Namespace, output_path: Path) -> None:
+def _publish_comment(args: argparse.Namespace, output_path: Path, repository_path: Path) -> None:
     if args.comment_mode == "dry_run":
         return
     body = output_path.read_text(encoding="utf-8")
     marker, comment = build_review_comment(args.mode, output_path, body)
-    result = GitHubPullRequestCommenter(GitHubContext.from_env()).publish(marker, comment)
+    commenter = GitHubPullRequestCommenter(GitHubContext.from_env())
+    result = commenter.publish(marker, comment)
     print(f"GitHub PR comment {result}.")
+    inline_comments = build_inline_review_comments(args.mode, body, repository_path)
+    inline_count = commenter.publish_inline_comments(inline_comments)
+    print(f"GitHub inline PR comments created: {inline_count}.")
 
 
 def _smoke_provider(args: argparse.Namespace) -> int:

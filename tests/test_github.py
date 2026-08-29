@@ -3,7 +3,12 @@ import json
 import unittest
 from unittest.mock import patch
 
-from code_review_agent.github import GitHubContext, GitHubPullRequestCommenter, build_review_comment
+from code_review_agent.github import (
+    GitHubContext,
+    GitHubPullRequestCommenter,
+    build_inline_review_comments,
+    build_review_comment,
+)
 
 
 class GitHubCommentTest(unittest.TestCase):
@@ -38,12 +43,78 @@ class GitHubCommentTest(unittest.TestCase):
         self.assertEqual(calls[-1][1], "https://api.github.test/comment/1")
         self.assertIn("new", calls[-1][2]["body"])
 
+    def test_build_inline_review_comments_parses_provider_findings(self) -> None:
+        body = """# Findings
+
+### Missing return after decode error
+- **File**: demo-projects/simple-api/internal/handler/product.go
+- **Line**: 115
+- **Rule ID**: GO-DEMO-001
+- **Slug**: thin-http-handlers
+- **Severity**: P1
+- **Reasoning**: The handler continues after writing an error response.
+- **Recommendation**: Return immediately after the error response.
+"""
+
+        comments = build_inline_review_comments("code-rules", body, Path("/repo"))
+
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0].path, "demo-projects/simple-api/internal/handler/product.go")
+        self.assertEqual(comments[0].line, 115)
+        self.assertIn("GO-DEMO-001", comments[0].body)
+        self.assertIn("thin-http-handlers", comments[0].body)
+        self.assertIn("P1", comments[0].body)
+        self.assertTrue(comments[0].marker.startswith("<!-- code-review-agent-inline:code-rules:"))
+
+    def test_publish_inline_comments_filters_to_changed_lines_and_skips_existing(self) -> None:
+        calls: list[tuple[str, str, dict | None]] = []
+        commenter = GitHubPullRequestCommenter(_context())
+        comments = build_inline_review_comments(
+            "code-rules",
+            """### Existing finding
+- File: demo/foo.go
+- Line: 2
+- Rule ID: GO-DEMO-001
+
+### New finding
+- File: demo/foo.go
+- Line: 3
+- Rule ID: GO-DEMO-002
+
+### Unchanged finding
+- File: demo/bar.go
+- Line: 10
+- Rule ID: GO-DEMO-003
+""",
+            Path("/repo"),
+        )
+        existing = [{"body": comments[0].marker}]
+        files = [
+            {
+                "filename": "demo/foo.go",
+                "patch": "@@ -1,3 +1,3 @@\n line1\n-old\n+new\n line3",
+            }
+        ]
+
+        with patch("code_review_agent.github.request.urlopen", side_effect=_fake_urlopen(calls, [files, existing])):
+            count = commenter.publish_inline_comments(comments)
+
+        self.assertEqual(count, 1)
+        post_calls = [call for call in calls if call[0] == "POST"]
+        self.assertEqual(len(post_calls), 1)
+        self.assertEqual(post_calls[0][1], "https://api.github.test/repos/owner/repo/pulls/7/comments")
+        self.assertEqual(post_calls[0][2]["commit_id"], "abc123")
+        self.assertEqual(post_calls[0][2]["path"], "demo/foo.go")
+        self.assertEqual(post_calls[0][2]["line"], 3)
+        self.assertEqual(post_calls[0][2]["side"], "RIGHT")
+
 
 def _context() -> GitHubContext:
     return GitHubContext(
         token="token",
         repository="owner/repo",
         pull_request_number=7,
+        head_sha="abc123",
         api_url="https://api.github.test",
     )
 
