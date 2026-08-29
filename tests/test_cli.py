@@ -1,8 +1,10 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from code_review_agent.cli import main
+from code_review_agent.providers import ChatResult
 
 
 class CliTest(unittest.TestCase):
@@ -83,6 +85,47 @@ func create() {
             summary = repo / ".code-review" / "artifacts" / "simple-api-prd-td-summary.md"
             self.assertIn("Create Product", summary.read_text(encoding="utf-8"))
 
+    def test_qwen_code_rules_writes_provider_review_and_audit_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "repo"
+            kb = root / "knowledgebase"
+            repo.mkdir()
+            (repo / ".code-review.yml").write_text(_config(), encoding="utf-8")
+            handler = repo / "demo-projects" / "simple-api" / "internal" / "handler"
+            handler.mkdir(parents=True)
+            target = handler / "product.go"
+            target.write_text("package handler\n", encoding="utf-8")
+            rules = kb / "demo" / "demo-project" / "go"
+            rules.mkdir(parents=True)
+            (rules / "RULES.md").write_text(_project_rule(), encoding="utf-8")
+            provider = _FakeProvider()
+
+            output = repo / ".code-review" / "artifacts" / "code-rules-review.md"
+            with patch("code_review_agent.cli.OpenAICompatibleProvider.from_env", return_value=provider):
+                exit_code = main(
+                    [
+                        "run",
+                        "--mode",
+                        "code-rules",
+                        "--repository",
+                        str(repo),
+                        "--knowledgebase",
+                        str(kb),
+                        "--output",
+                        str(output),
+                        "--provider",
+                        "qwen",
+                        "--changed-file",
+                        str(target),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("provider finding", output.read_text(encoding="utf-8"))
+            audit = repo / "output" / "code-rules-review.md"
+            self.assertIn("Provider Transcript", audit.read_text(encoding="utf-8"))
+
 
 def _config() -> str:
     return """version: 1
@@ -132,6 +175,11 @@ def _project_rule() -> str:
 
 Handlers must stop processing after request binding, JSON decoding, or path/query parsing fails.
 """
+
+
+class _FakeProvider:
+    def chat(self, *_args, **_kwargs) -> ChatResult:
+        return ChatResult(model="fake-qwen", content="provider finding", usage={"total_tokens": 3})
 
 
 if __name__ == "__main__":
