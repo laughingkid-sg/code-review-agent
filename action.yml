@@ -1,0 +1,55 @@
+name: Intelligent Code Review Agent
+description: Run code-rule or business-rule review for an existing GitHub pull request.
+
+inputs:
+  mode:
+    description: Review mode to run. Use code-rules, business-rules, or aggregate.
+    required: true
+  config-path:
+    description: Path to the target repository review config.
+    required: false
+    default: .code-review.yml
+  knowledgebase-path:
+    description: Path to the checked-out code-review-knowledgebase repository.
+    required: false
+    default: ../code-review-knowledgebase
+  output-path:
+    description: Markdown output path for review findings.
+    required: true
+  provider:
+    description: LLM provider name. Phase 2 supports mock; Phase 4 adds qwen.
+    required: false
+    default: mock
+  comment-mode:
+    description: Use dry_run during early phases. PR comments are enabled in Phase 5.
+    required: false
+    default: dry_run
+
+outputs:
+  review-output:
+    description: Path to the generated markdown review output.
+    value: ${{ inputs.output-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate action contract
+      shell: bash
+      run: |
+        echo "code-review-agent action contract"
+        echo "mode=${{ inputs.mode }}"
+        echo "config-path=${{ inputs.config-path }}"
+        echo "knowledgebase-path=${{ inputs.knowledgebase-path }}"
+        echo "output-path=${{ inputs.output-path }}"
+        echo "provider=${{ inputs.provider }}"
+        echo "comment-mode=${{ inputs.comment-mode }}"
+        mkdir -p "$(dirname "${{ inputs.output-path }}")"
+        {
+          echo "# Code Review Agent"
+          echo
+          echo "Action contract validation completed."
+          echo
+          echo "- Mode: ${{ inputs.mode }}"
+          echo "- Provider: ${{ inputs.provider }}"
+          echo "- Comment mode: ${{ inputs.comment-mode }}"
+        } > "${{ inputs.output-path }}"
