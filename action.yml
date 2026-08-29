@@ -40,6 +40,10 @@ inputs:
     description: Directory where provider request/response transcripts are written.
     required: false
     default: output
+  summary-cache-ttl-days:
+    description: Number of days a provider-generated PRD/TD summary may be reused.
+    required: false
+    default: "3"
 
 outputs:
   review-output:
@@ -75,5 +79,6 @@ runs:
           --provider "${{ inputs.provider }}" \
           --audit-dir "${{ inputs.audit-dir }}" \
           --comment-mode "${{ inputs.comment-mode }}" \
+          --summary-cache-ttl-days "${{ inputs.summary-cache-ttl-days }}" \
           --default-contributor "${{ inputs.default-contributor }}" \
           "${args[@]}"

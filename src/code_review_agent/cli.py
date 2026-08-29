@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--env-file", default=".env")
     run_parser.add_argument("--audit-dir", default="output")
     run_parser.add_argument("--comment-mode", choices=("dry_run", "pr_comment"), default="dry_run")
+    run_parser.add_argument("--summary-cache-ttl-days", type=int, default=3)
 
     smoke_parser = subparsers.add_parser("smoke-provider", help="Run a small OpenAI-compatible provider smoke test.")
     smoke_parser.add_argument("--env-file", default=".env")
@@ -75,6 +76,7 @@ def _run(args: argparse.Namespace) -> int:
             output_path=output_path,
             provider=provider,
             audit_recorder=audit_recorder,
+            summary_cache_ttl_days=args.summary_cache_ttl_days,
         )
     elif args.mode == "aggregate":
         run_aggregate(output_path=output_path)
@@ -89,8 +91,8 @@ def _run(args: argparse.Namespace) -> int:
 def _resolve_path(repository_path: Path, value: str) -> Path:
     path = Path(value)
     if path.is_absolute():
-        return path
-    return repository_path / path
+        return path.resolve()
+    return (repository_path / path).resolve()
 
 
 def _provider_from_args(args: argparse.Namespace, repository_path: Path) -> OpenAICompatibleProvider | None:
