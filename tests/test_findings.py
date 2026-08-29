@@ -56,6 +56,32 @@ return
         self.assertEqual(findings[0].line, 62)
         self.assertIn("r.Price < 0", findings[0].corrected_code)
 
+    def test_parse_provider_heading_findings(self) -> None:
+        findings = parse_review_findings(
+            """## Finding 1
+**Title:** Handler continues execution after JSON decode failure
+**Rule ID:** GO-DEMO-PROJ-001
+**Slug:** stop-after-request-binding-failure
+**Severity:** P1
+**File:** demo/handler.go
+**Line:** 116
+**Reasoning:** Decode errors fall through.
+**Recommendation:** Return after writeError.
+
+```go
+return
+```
+""",
+            Path("/repo"),
+        )
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].title, "Handler continues execution after JSON decode failure")
+        self.assertEqual(findings[0].rule_id, "GO-DEMO-PROJ-001")
+        self.assertEqual(findings[0].slug, "stop-after-request-binding-failure")
+        self.assertEqual(findings[0].line, 116)
+        self.assertEqual(findings[0].corrected_code, "return")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -179,8 +179,30 @@ func create() {
             (repo / ".code-review.yml").write_text(_config(), encoding="utf-8")
             code_review = repo / "code-rules-review.md"
             business_review = repo / "business-rules-review.md"
-            code_review.write_text("# Code\n\n### Code finding\n", encoding="utf-8")
-            business_review.write_text("# Business\n\n### Business finding\n", encoding="utf-8")
+            code_review.write_text(
+                """# Code
+
+### Code finding
+- File: demo/a.go
+- Line: 12
+- Rule ID: GO-DEMO-001
+- Slug: code-rule
+- Severity: P1
+- Recommendation: Fix code issue.
+""",
+                encoding="utf-8",
+            )
+            business_review.write_text(
+                """# Business
+
+### Business finding
+- File: demo/b.go
+- Line: 22
+- Severity: P2
+- Recommendation: Fix business issue.
+""",
+                encoding="utf-8",
+            )
             output = repo / ".code-review" / "artifacts" / "aggregate-review.md"
 
             exit_code = main(
@@ -205,6 +227,8 @@ func create() {
             report = output.read_text(encoding="utf-8")
             self.assertIn("Code finding", report)
             self.assertIn("Business finding", report)
+            self.assertIn("| `code-rules-review.md` | 1 |", report)
+            self.assertIn("Fix business issue.", report)
 
 
 def _config() -> str:

@@ -79,8 +79,9 @@ def _finding_from_mapping(item: dict[str, Any], repository_path: Path) -> Review
 
 def _parse_markdown_findings(body: str, repository_path: Path) -> tuple[ReviewFinding, ...]:
     findings: list[ReviewFinding] = []
-    for title, block in _finding_blocks(body):
+    for heading, block in _finding_blocks(body):
         fields = _parse_finding_fields(block)
+        title = fields.get("title") or heading
         path = _finding_path(fields, repository_path)
         line = _finding_line(fields)
         if not path or not line:
@@ -104,23 +105,33 @@ def _parse_markdown_findings(body: str, repository_path: Path) -> tuple[ReviewFi
 
 
 def _finding_blocks(body: str) -> tuple[tuple[str, str], ...]:
-    matches = list(re.finditer(r"^###\s+(?P<title>.+?)\s*$", body, flags=re.MULTILINE))
+    matches = list(re.finditer(r"^#{2,3}\s+(?P<title>.+?)\s*$", body, flags=re.MULTILINE))
     blocks: list[tuple[str, str]] = []
     for index, match in enumerate(matches):
         start = match.end()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
-        blocks.append((match.group("title").strip(), body[start:end].strip()))
+        title = match.group("title").strip()
+        block = body[start:end].strip()
+        if _looks_like_finding(title, block):
+            blocks.append((title, block))
     return tuple(blocks)
+
+
+def _looks_like_finding(title: str, block: str) -> bool:
+    if title.lower().startswith("finding"):
+        return True
+    fields = _parse_finding_fields(block)
+    return bool((fields.get("file") or fields.get("location")) and fields.get("line"))
 
 
 def _parse_finding_fields(block: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in block.splitlines():
-        match = re.match(r"^-\s+(?:\*\*)?(?P<key>[A-Za-z ]+)(?:\*\*)?:\s*(?P<value>.+?)\s*$", line.strip())
+        match = re.match(r"^(?:-\s+)?(?:\*\*)?(?P<key>[A-Za-z ]+)(?:\*\*)?:\s*(?:\*\*)?(?P<value>.+?)\s*$", line.strip())
         if not match:
             continue
         key = match.group("key").strip().lower().replace(" ", "_")
-        value = match.group("value").strip().strip("`")
+        value = match.group("value").strip().strip("`").strip("* ")
         fields[key] = value
     return fields
 
