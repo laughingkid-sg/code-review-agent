@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--output", required=True)
     run_parser.add_argument("--default-contributor", default="codex")
     run_parser.add_argument("--changed-file", action="append", default=[])
-    run_parser.add_argument("--provider", choices=("mock", "qwen"), default="mock")
+    run_parser.add_argument("--provider", choices=("mock", "llm", "qwen"), default="mock")
     run_parser.add_argument("--env-file", default=".env")
     run_parser.add_argument("--audit-dir", default="output")
     run_parser.add_argument("--comment-mode", choices=("dry_run", "pr_comment"), default="dry_run")

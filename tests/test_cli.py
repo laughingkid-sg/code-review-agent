@@ -85,7 +85,7 @@ func create() {
             summary = repo / ".code-review" / "artifacts" / "simple-api-prd-td-summary.md"
             self.assertIn("Create Product", summary.read_text(encoding="utf-8"))
 
-    def test_qwen_code_rules_writes_provider_review_and_audit_log(self) -> None:
+    def test_llm_code_rules_writes_provider_review_and_audit_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             repo = root / "repo"
@@ -115,7 +115,7 @@ func create() {
                         "--output",
                         str(output),
                         "--provider",
-                        "qwen",
+                        "llm",
                         "--changed-file",
                         str(target),
                     ]
@@ -126,7 +126,7 @@ func create() {
             audit = repo / "output" / "code-rules-review.md"
             self.assertIn("Provider Transcript", audit.read_text(encoding="utf-8"))
 
-    def test_qwen_business_rules_reuses_fresh_summary_cache(self) -> None:
+    def test_llm_business_rules_reuses_fresh_summary_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             repo = root / "repo"
@@ -159,7 +159,7 @@ func create() {
                         "--output",
                         str(output),
                         "--provider",
-                        "qwen",
+                        "llm",
                         "--changed-file",
                         str(target),
                     ]
@@ -287,7 +287,7 @@ class _FakeProvider:
 
     def chat(self, *_args, **_kwargs) -> ChatResult:
         self.calls += 1
-        return ChatResult(model="fake-qwen", content="provider finding", usage={"total_tokens": 3})
+        return ChatResult(model="fake-llm", content="provider finding", usage={"total_tokens": 3})
 
 
 if __name__ == "__main__":

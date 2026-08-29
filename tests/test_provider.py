@@ -16,7 +16,7 @@ class ProviderConfigTest(unittest.TestCase):
                 """
 OPENAI_BASE_URL="https://example.test/v1"
 OPENAI_API_KEY=file-key
-OPENAI_MODEL='qwen-test'
+OPENAI_MODEL='llm-test'
 """,
                 encoding="utf-8",
             )
@@ -26,7 +26,7 @@ OPENAI_MODEL='qwen-test'
 
                 self.assertEqual(os.environ["OPENAI_BASE_URL"], "https://example.test/v1")
                 self.assertEqual(os.environ["OPENAI_API_KEY"], "existing-key")
-                self.assertEqual(os.environ["OPENAI_MODEL"], "qwen-test")
+                self.assertEqual(os.environ["OPENAI_MODEL"], "llm-test")
 
     def test_openai_compatible_provider_requires_env_values(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

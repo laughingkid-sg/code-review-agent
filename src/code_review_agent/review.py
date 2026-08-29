@@ -385,7 +385,7 @@ def _common_parent(paths: tuple[Path, ...]) -> Path:
 
 
 def _review_mode(provider: OpenAICompatibleProvider | None) -> str:
-    return "provider-backed qwen review" if provider else "deterministic dry-run"
+    return "provider-backed LLM review" if provider else "deterministic dry-run"
 
 
 def _heuristic_findings(rules: tuple[Rule, ...], files: tuple[Path, ...]) -> tuple[Finding, ...]:
