@@ -21,6 +21,7 @@ class GitHubContext:
     pull_request_number: int
     head_sha: str
     api_url: str = "https://api.github.com"
+    server_url: str = "https://github.com"
 
     @classmethod
     def from_env(cls) -> "GitHubContext":
@@ -28,6 +29,7 @@ class GitHubContext:
         repository = os.environ.get("GITHUB_REPOSITORY", "").strip()
         event_path = os.environ.get("GITHUB_EVENT_PATH", "").strip()
         api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").strip().rstrip("/")
+        server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").strip().rstrip("/")
         missing = [
             name
             for name, value in (
@@ -49,7 +51,14 @@ class GitHubContext:
         if not head_sha:
             raise GitHubError("GitHub event did not include pull_request.head.sha.")
 
-        return cls(token=token, repository=repository, pull_request_number=number, head_sha=head_sha, api_url=api_url)
+        return cls(
+            token=token,
+            repository=repository,
+            pull_request_number=number,
+            head_sha=head_sha,
+            api_url=api_url,
+            server_url=server_url,
+        )
 
 
 @dataclass(frozen=True)
@@ -75,18 +84,22 @@ class GitHubPullRequestCommenter:
 
     def publish_inline_comments(self, comments: tuple[InlineReviewComment, ...]) -> int:
         valid_lines = self._changed_lines_by_file()
-        existing_markers = self._existing_inline_markers()
+        existing_comments = self._existing_inline_comments()
         published = 0
         for comment in comments:
-            if comment.marker in existing_markers:
-                continue
             if comment.line not in valid_lines.get(comment.path, set()):
+                continue
+            comment_body = self._format_inline_comment(comment)
+            existing = existing_comments.get(comment.marker)
+            if existing:
+                self._request("PATCH", existing["url"], {"body": comment_body})
+                published += 1
                 continue
             self._request(
                 "POST",
                 self._review_comments_url(),
                 {
-                    "body": f"{comment.marker}\n\n{comment.body.strip()}\n",
+                    "body": comment_body,
                     "commit_id": self.context.head_sha,
                     "path": comment.path,
                     "line": comment.line,
@@ -117,24 +130,51 @@ class GitHubPullRequestCommenter:
     def _files_url(self) -> str:
         return f"{self.context.api_url}/repos/{self.context.repository}/pulls/{self.context.pull_request_number}/files"
 
-    def _existing_inline_markers(self) -> set[str]:
-        comments = self._request("GET", self._review_comments_url())
-        markers: set[str] = set()
-        for comment in comments or []:
-            match = re.search(r"<!-- code-review-agent-inline:[^>]+ -->", str(comment.get("body", "")))
-            if match:
-                markers.add(match.group(0))
-        return markers
+    def _existing_inline_comments(self) -> dict[str, dict[str, Any]]:
+        page = 1
+        comments_by_marker: dict[str, dict[str, Any]] = {}
+        while True:
+            url = f"{self._review_comments_url()}?{parse.urlencode({'per_page': 100, 'page': page})}"
+            comments = self._request("GET", url)
+            if not comments:
+                return comments_by_marker
+            for comment in comments:
+                match = re.search(r"<!-- code-review-agent-inline:[^>]+ -->", str(comment.get("body", "")))
+                if match:
+                    comments_by_marker[match.group(0)] = comment
+            page += 1
 
     def _changed_lines_by_file(self) -> dict[str, set[int]]:
-        files = self._request("GET", self._files_url())
         changed: dict[str, set[int]] = {}
-        for file_item in files or []:
-            filename = str(file_item.get("filename", ""))
-            patch = str(file_item.get("patch", ""))
-            if filename and patch:
-                changed[filename] = _patch_new_lines(patch)
-        return changed
+        page = 1
+        while True:
+            url = f"{self._files_url()}?{parse.urlencode({'per_page': 100, 'page': page})}"
+            files = self._request("GET", url)
+            if not files:
+                return changed
+            for file_item in files:
+                filename = str(file_item.get("filename", ""))
+                patch = str(file_item.get("patch", ""))
+                if filename and patch:
+                    changed[filename] = _patch_new_lines(patch)
+            page += 1
+
+    def _format_inline_comment(self, comment: InlineReviewComment) -> str:
+        return "\n".join(
+            [
+                comment.marker,
+                "",
+                comment.body.strip(),
+                "",
+                "---",
+                f"[View changed line]({self._line_url(comment)})",
+                "",
+            ]
+        )
+
+    def _line_url(self, comment: InlineReviewComment) -> str:
+        path = parse.quote(comment.path, safe="/")
+        return f"{self.context.server_url}/{self.context.repository}/blob/{self.context.head_sha}/{path}#L{comment.line}"
 
     def _request(self, method: str, url: str, payload: dict[str, Any] | None = None) -> Any:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -186,7 +226,7 @@ def build_inline_review_comments(mode: str, body: str, repository_path: Path) ->
         line = _finding_line(fields)
         if not path or not line:
             continue
-        comment_body = _inline_body(title, fields)
+        comment_body = _inline_body(title, fields, _finding_code_block(block))
         marker = _inline_marker(mode, path, line, title)
         comments.append(InlineReviewComment(path=path, line=line, marker=marker, body=comment_body))
     return tuple(_dedupe_inline_comments(comments))
@@ -249,20 +289,44 @@ def _finding_line(fields: dict[str, str]) -> int | None:
     return int(match.group(0)) if match else None
 
 
-def _inline_body(title: str, fields: dict[str, str]) -> str:
-    lines = [f"**{title}**", ""]
-    for label, key in (
-        ("Rule", "rule"),
-        ("Rule ID", "rule_id"),
-        ("Slug", "slug"),
-        ("Severity", "severity"),
-        ("Reasoning", "reasoning"),
-        ("Recommendation", "recommendation"),
-    ):
-        value = fields.get(key)
-        if value:
-            lines.append(f"- {label}: {value}")
+def _finding_code_block(block: str) -> str:
+    match = re.search(r"```(?P<language>[A-Za-z0-9_-]*)\n(?P<code>.*?)\n```", block, flags=re.DOTALL)
+    if not match:
+        return ""
+    language = match.group("language").strip() or "go"
+    code = match.group("code").strip()
+    return f"```{language}\n{code}\n```" if code else ""
+
+
+def _inline_body(title: str, fields: dict[str, str], code_block: str) -> str:
+    slug = fields.get("slug", "")
+    title_line = f"### [{title}](#{slug})" if slug else f"### {title}"
+    lines = [title_line, ""]
+
+    rule_id = fields.get("rule_id") or fields.get("rule")
+    if rule_id:
+        lines.extend([f"**RuleID:** `{_strip_code_ticks(rule_id)}`", ""])
+
+    severity = fields.get("severity")
+    if severity:
+        lines.extend([f"**Severity:** `{_strip_code_ticks(severity)}`", ""])
+
+    reasoning = fields.get("reasoning")
+    if reasoning:
+        lines.extend(["**Reasoning**", f"> {_strip_code_ticks(reasoning)}", ""])
+
+    recommendation = fields.get("recommendation")
+    if recommendation:
+        lines.extend(["## Recommendation", _strip_code_ticks(recommendation), ""])
+
+    if code_block:
+        lines.extend([code_block, ""])
+
     return "\n".join(lines)
+
+
+def _strip_code_ticks(value: str) -> str:
+    return value.strip().strip("`")
 
 
 def _inline_marker(mode: str, path: str, line: int, title: str) -> str:
@@ -290,10 +354,12 @@ def _dedupe_inline_comments(comments: list[InlineReviewComment]) -> tuple[Inline
 
 
 def _inline_rule_key(comment: InlineReviewComment) -> tuple[str, str] | None:
-    for field in ("Slug", "Rule ID", "Rule"):
-        match = re.search(rf"^-\s+{re.escape(field)}:\s*(?P<value>.+?)\s*$", comment.body, flags=re.MULTILINE)
-        if match:
-            return (comment.path, match.group("value").strip().lower())
+    title_slug = re.search(r"^###\s+\[.+?\]\(#(?P<slug>[a-z0-9][a-z0-9-]*)\)", comment.body, flags=re.MULTILINE)
+    if title_slug:
+        return (comment.path, title_slug.group("slug"))
+    rule_id = re.search(r"^\*\*RuleID:\*\*\s+`?(?P<value>[^`\n]+)`?\s*$", comment.body, flags=re.MULTILINE)
+    if rule_id:
+        return (comment.path, rule_id.group("value").strip().lower())
     return None
 
 

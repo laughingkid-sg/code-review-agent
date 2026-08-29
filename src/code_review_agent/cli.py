@@ -118,7 +118,7 @@ def _publish_comment(args: argparse.Namespace, output_path: Path, repository_pat
     print(f"GitHub PR comment {result}.")
     inline_comments = build_inline_review_comments(args.mode, body, repository_path)
     inline_count = commenter.publish_inline_comments(inline_comments)
-    print(f"GitHub inline PR comments created: {inline_count}.")
+    print(f"GitHub inline PR comments created/updated: {inline_count}.")
 
 
 def _smoke_provider(args: argparse.Namespace) -> int:

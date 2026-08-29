@@ -205,7 +205,11 @@ def _provider_code_review(
                 [
                     f"Repository: {config.repository_name}",
                     "Review only the provided Go files against the rules below. Flag only issues directly supported by the code.",
-                    "For each finding, include title, rule ID, slug, severity, file, line, reasoning, and recommendation. If there are no findings, say so.",
+                    (
+                        "For each finding, include title, rule ID, slug, severity, file, line, reasoning, "
+                        "recommendation, and a minimal corrected code snippet in a fenced go block. "
+                        "If there are no findings, say so."
+                    ),
                     "# Rules",
                     compact_review_payload(rules),
                     "# Changed Go Files",
@@ -272,7 +276,11 @@ def _provider_business_review(
                     "Review the implementation against the PRD/TD summary. Focus on changed files, but use the supporting files to avoid false positives.",
                     f"Changed files: {_changed_file_list(changed_files)}",
                     "Flag business logic mismatches, missing required behavior, and incorrect conditions. Do not flag a requirement as missing when a supporting file implements it.",
-                    "For each finding, include title, severity P0-P3, file, line, reasoning, and recommendation. If there are no findings, say so.",
+                    (
+                        "For each finding, include title, severity P0-P3, file, line, reasoning, "
+                        "recommendation, and a minimal corrected code snippet in a fenced go block when a code change is clear. "
+                        "If there are no findings, say so."
+                    ),
                     "# PRD/TD Summary",
                     summary.output_path.read_text(encoding="utf-8"),
                     "# Implementation Files",
