@@ -100,7 +100,7 @@ The current demo uses an OpenAI-compatible LLM provider. Alibaba Model Studio/Qw
 
 ## Findings and Comments
 
-The agent parses model output into structured `ReviewFinding` records before rendering comments. The parser supports current markdown findings and future fenced JSON findings.
+The agent asks provider-backed reviews for a JSON object with `findings[]`, parses those records into structured `ReviewFinding` values, then renders markdown artifacts and GitHub comments from the parsed data. Markdown parsing is kept only as a compatibility fallback for older artifacts.
 
 Inline comments include:
 
@@ -115,9 +115,4 @@ Generated inline comments include hidden markers. On rerun, the agent updates ma
 
 ## Future Improvements
 
-- Prefer provider-native structured JSON output for all findings.
-- Export machine-readable finding lifecycle events to an external Hive table.
-- Analyze rule effectiveness, false positives, resolved findings, unresolved findings, consumption rate, and non-consumption rate from Hive.
-- Add richer aggregation that clusters duplicate code-rule and business-rule findings.
-- Add integrations for Slack, Lark, or Teams notifications after review completion.
-- Extend the reusable AI Skill in `skills/intelligent-code-review/` as the workflow generalizes beyond the demo.
+Detailed future improvements and required changes are tracked in [docs/future-improvements/README.md](docs/future-improvements/README.md).

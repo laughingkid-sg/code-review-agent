@@ -50,13 +50,21 @@ class OpenAICompatibleProvider:
             raise ProviderError(f"Missing required environment variable(s): {', '.join(missing)}")
         return cls(base_url=base_url.rstrip("/"), api_key=api_key, model=model)
 
-    def chat(self, messages: list[ChatMessage], max_tokens: int = 128, temperature: float = 0) -> ChatResult:
+    def chat(
+        self,
+        messages: list[ChatMessage],
+        max_tokens: int = 128,
+        temperature: float = 0,
+        response_format: dict[str, Any] | None = None,
+    ) -> ChatResult:
         payload = {
             "model": self.model,
             "messages": [{"role": message.role, "content": message.content} for message in messages],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if response_format:
+            payload["response_format"] = response_format
         response = self._post_json("/chat/completions", payload)
         choices = response.get("choices") or []
         if not choices:

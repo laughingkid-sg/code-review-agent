@@ -74,6 +74,7 @@ def _run(args: argparse.Namespace) -> int:
     elif args.mode == "business-rules":
         business_rules.run(
             config=config,
+            repository_path=repository_path,
             changed_files=changed_files,
             output_path=output_path,
             provider=provider,

@@ -8,7 +8,7 @@ import time
 from .audit import AuditRecorder
 from .config import DocumentSet, ReviewConfig
 from .documents import DocumentSummary, affected_document_sets, build_document_summary, write_document_summary
-from .findings import ReviewFinding, parse_review_findings
+from .findings import ReviewFinding, parse_json_review_findings, parse_review_findings, render_review_findings_markdown
 from .providers import ChatMessage, OpenAICompatibleProvider
 from .rules import Rule, compact_review_payload
 
@@ -88,6 +88,7 @@ def run_code_rules(
 
 def run_business_rules(
     config: ReviewConfig,
+    repository_path: Path,
     changed_files: tuple[Path, ...],
     output_path: Path,
     provider: OpenAICompatibleProvider | None = None,
@@ -102,7 +103,7 @@ def run_business_rules(
     provider_reviews: list[str] = []
     if provider:
         for summary in summaries:
-            provider_reviews.append(_provider_business_review(config, summary, changed_files, provider, audit_recorder))
+            provider_reviews.append(_provider_business_review(config, repository_path, summary, changed_files, provider, audit_recorder))
     lines = [
         "# Business Rules Review",
         "",
@@ -226,17 +227,17 @@ def _provider_code_review(
         return "No Go files were selected, so provider-backed code-rule review was skipped."
 
     messages = [
-        ChatMessage(role="system", content="You are a concise CI code review agent. Return markdown only."),
+        ChatMessage(role="system", content="You are a concise CI code review agent. Return a JSON object only."),
         ChatMessage(
             role="user",
             content="\n\n".join(
                 [
                     f"Repository: {config.repository_name}",
                     "Review only the provided Go files against the rules below. Flag only issues directly supported by the code.",
+                    _finding_json_contract(require_rule=True),
                     (
-                        "For each finding, include title, rule ID, slug, severity, file, line, reasoning, "
-                        "recommendation, and a minimal corrected code snippet in a fenced go block. "
-                        "If there are no findings, say so."
+                        "Use repository-relative file paths exactly as shown in the changed files. "
+                        "If there are no findings, return {\"findings\": []}."
                     ),
                     "# Rules",
                     compact_review_payload(rules),
@@ -246,10 +247,13 @@ def _provider_code_review(
             ),
         ),
     ]
-    result = provider.chat(messages, max_tokens=1400, temperature=0)
+    result = provider.chat(messages, max_tokens=1400, temperature=0, response_format={"type": "json_object"})
     if audit_recorder:
         audit_recorder.write("code-rules-review", messages, result)
-    return result.content
+    findings = parse_json_review_findings(result.content, repository_path)
+    if findings is None:
+        return "Provider returned invalid JSON finding output. See `output/code-rules-review.md` for the raw response transcript."
+    return render_review_findings_markdown(findings, "- No provider findings.")
 
 
 def _provider_document_summary(
@@ -283,6 +287,7 @@ def _provider_document_summary(
 
 def _provider_business_review(
     config: ReviewConfig,
+    repository_path: Path,
     summary: DocumentSummary,
     changed_files: tuple[Path, ...],
     provider: OpenAICompatibleProvider,
@@ -294,7 +299,7 @@ def _provider_business_review(
         return f"### {document_set.name}\n\nNo implementation files were selected for provider-backed business review."
 
     messages = [
-        ChatMessage(role="system", content="You are a concise business-logic code review agent. Return markdown only."),
+        ChatMessage(role="system", content="You are a concise business-logic code review agent. Return a JSON object only."),
         ChatMessage(
             role="user",
             content="\n\n".join(
@@ -304,23 +309,45 @@ def _provider_business_review(
                     "Review the implementation against the PRD/TD summary. Focus on changed files, but use the supporting files to avoid false positives.",
                     f"Changed files: {_changed_file_list(changed_files)}",
                     "Flag business logic mismatches, missing required behavior, and incorrect conditions. Do not flag a requirement as missing when a supporting file implements it.",
+                    _finding_json_contract(require_rule=False),
                     (
-                        "For each finding, include title, severity P0-P3, file, line, reasoning, "
-                        "recommendation, and a minimal corrected code snippet in a fenced go block when a code change is clear. "
-                        "If there are no findings, say so."
+                        "Use repository-relative file paths exactly as shown in the implementation files. "
+                        "Use rule_id and slug only when the finding directly maps to a known coding rule; otherwise leave them empty. "
+                        "If there are no findings, return {\"findings\": []}."
                     ),
                     "# PRD/TD Summary",
                     summary.output_path.read_text(encoding="utf-8"),
                     "# Implementation Files",
-                    _code_context(_common_parent(document_set.code_paths), files),
+                    _code_context(repository_path, files),
                 ]
             ),
         ),
     ]
-    result = provider.chat(messages, max_tokens=1400, temperature=0)
+    result = provider.chat(messages, max_tokens=1400, temperature=0, response_format={"type": "json_object"})
     if audit_recorder:
         audit_recorder.write(f"business-review-{document_set.id}", messages, result)
-    return f"### {document_set.name}\n\n{result.content.strip()}"
+    findings = parse_json_review_findings(result.content, repository_path)
+    if findings is None:
+        rendered = "Provider returned invalid JSON finding output. See the raw response transcript in `output/`."
+    else:
+        rendered = render_review_findings_markdown(findings, "- No provider findings.")
+    return f"### {document_set.name}\n\n{rendered}"
+
+
+def _finding_json_contract(require_rule: bool) -> str:
+    rule_instruction = (
+        "rule_id and slug are required and must come from the matched rule."
+        if require_rule
+        else "rule_id and slug are optional; use empty strings when no coding rule applies."
+    )
+    return " ".join(
+        [
+            "Return exactly one JSON object with this schema:",
+            '{"findings":[{"title":"string","rule_id":"string","slug":"string","severity":"P0|P1|P2|P3","file":"repo-relative/path.go","line":1,"reasoning":"string","recommendation":"string","corrected_code":"string","language":"go"}]}',
+            rule_instruction,
+            "corrected_code must be plain code without markdown fences.",
+        ]
+    )
 
 
 def _business_review_files(code_paths: tuple[Path, ...], changed_files: tuple[Path, ...]) -> tuple[Path, ...]:
@@ -376,12 +403,6 @@ def _relative_path(path: Path, repository_path: Path) -> str:
         return str(path.relative_to(repository_path))
     except ValueError:
         return str(path)
-
-
-def _common_parent(paths: tuple[Path, ...]) -> Path:
-    if not paths:
-        return Path(".")
-    return paths[0].parent
 
 
 def _review_mode(provider: OpenAICompatibleProvider | None) -> str:

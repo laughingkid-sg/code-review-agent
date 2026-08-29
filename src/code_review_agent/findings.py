@@ -22,19 +22,19 @@ class ReviewFinding:
 
 
 def parse_review_findings(body: str, repository_path: Path) -> tuple[ReviewFinding, ...]:
-    structured = _parse_json_findings(body, repository_path)
-    if structured:
+    structured = parse_json_review_findings(body, repository_path)
+    if structured is not None:
         return structured
     return _parse_markdown_findings(body, repository_path)
 
 
-def _parse_json_findings(body: str, repository_path: Path) -> tuple[ReviewFinding, ...]:
+def parse_json_review_findings(body: str, repository_path: Path) -> tuple[ReviewFinding, ...] | None:
     payload = _json_payload(body)
     if payload is None:
-        return ()
+        return None
     raw_findings = payload.get("findings") if isinstance(payload, dict) else payload
     if not isinstance(raw_findings, list):
-        return ()
+        return None
 
     findings: list[ReviewFinding] = []
     for item in raw_findings:
@@ -44,6 +44,33 @@ def _parse_json_findings(body: str, repository_path: Path) -> tuple[ReviewFindin
         if finding:
             findings.append(finding)
     return tuple(findings)
+
+
+def render_review_findings_markdown(findings: tuple[ReviewFinding, ...], empty_message: str) -> str:
+    if not findings:
+        return empty_message
+
+    lines: list[str] = []
+    for finding in findings:
+        lines.extend(
+            [
+                f"### {finding.title}",
+                "",
+            ]
+        )
+        if finding.rule_id:
+            lines.append(f"- Rule ID: `{finding.rule_id}`")
+        if finding.slug:
+            lines.append(f"- Slug: `{finding.slug}`")
+        lines.extend([f"- Severity: `{finding.severity}`", f"- File: `{finding.path}`", f"- Line: {finding.line}"])
+        if finding.reasoning:
+            lines.append(f"- Reasoning: {finding.reasoning}")
+        if finding.recommendation:
+            lines.append(f"- Recommendation: {finding.recommendation}")
+        lines.append("")
+        if finding.corrected_code:
+            lines.extend([f"```{finding.language or 'go'}", finding.corrected_code, "```", ""])
+    return "\n".join(lines).rstrip()
 
 
 def _json_payload(body: str) -> Any:
@@ -67,14 +94,25 @@ def _finding_from_mapping(item: dict[str, Any], repository_path: Path) -> Review
         title=title,
         rule_id=str(item.get("rule_id") or item.get("rule") or "").strip("` "),
         slug=str(item.get("slug") or "").strip("` "),
-        severity=str(item.get("severity") or "P3").strip("` "),
+        severity=_severity(item.get("severity")),
         path=path,
         line=line,
         reasoning=str(item.get("reasoning") or "").strip(),
         recommendation=str(item.get("recommendation") or "").strip(),
-        corrected_code=str(item.get("corrected_code") or item.get("code") or "").strip(),
+        corrected_code=_clean_corrected_code(str(item.get("corrected_code") or item.get("code") or "")),
         language=str(item.get("language") or "go").strip("` ") or "go",
     )
+
+
+def _severity(value: Any) -> str:
+    severity = str(value or "P3").strip("` ").upper()
+    return severity if severity in {"P0", "P1", "P2", "P3"} else "P3"
+
+
+def _clean_corrected_code(value: str) -> str:
+    code = value.strip()
+    fenced = re.fullmatch(r"```[A-Za-z0-9_-]*\n(?P<code>.*?)\n```", code, flags=re.DOTALL)
+    return fenced.group("code").strip() if fenced else code
 
 
 def _parse_markdown_findings(body: str, repository_path: Path) -> tuple[ReviewFinding, ...]:

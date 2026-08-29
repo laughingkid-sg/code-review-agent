@@ -123,6 +123,7 @@ func create() {
 
             self.assertEqual(exit_code, 0)
             self.assertIn("provider finding", output.read_text(encoding="utf-8"))
+            self.assertEqual(provider.response_formats, [{"type": "json_object"}])
             audit = repo / "output" / "code-rules-review.md"
             self.assertIn("Provider Transcript", audit.read_text(encoding="utf-8"))
 
@@ -167,6 +168,7 @@ func create() {
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(provider.calls, 1)
+            self.assertEqual(provider.response_formats, [{"type": "json_object"}])
             self.assertEqual(summary.read_text(encoding="utf-8"), "# Cached Summary\n")
             self.assertFalse((repo / "output" / "business-summary-simple-api.md").exists())
             self.assertTrue((repo / "output" / "business-review-simple-api.md").exists())
@@ -284,10 +286,22 @@ Handlers must stop processing after request binding, JSON decoding, or path/quer
 class _FakeProvider:
     def __init__(self) -> None:
         self.calls = 0
+        self.response_formats = []
 
-    def chat(self, *_args, **_kwargs) -> ChatResult:
+    def chat(self, *_args, **kwargs) -> ChatResult:
         self.calls += 1
-        return ChatResult(model="fake-llm", content="provider finding", usage={"total_tokens": 3})
+        self.response_formats.append(kwargs.get("response_format"))
+        return ChatResult(
+            model="fake-llm",
+            content=(
+                '{"findings":[{"title":"provider finding","rule_id":"GO-DEMO-PROJ-001",'
+                '"slug":"stop-after-request-binding-failure","severity":"P1",'
+                '"file":"demo-projects/simple-api/internal/handler/product.go","line":1,'
+                '"reasoning":"structured reason","recommendation":"structured recommendation",'
+                '"corrected_code":"return","language":"go"}]}'
+            ),
+            usage={"total_tokens": 3},
+        )
 
 
 if __name__ == "__main__":

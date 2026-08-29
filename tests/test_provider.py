@@ -33,6 +33,19 @@ OPENAI_MODEL='llm-test'
             with self.assertRaisesRegex(ProviderError, "OPENAI_BASE_URL"):
                 OpenAICompatibleProvider.from_env()
 
+    def test_chat_can_request_json_object_response_format(self) -> None:
+        payloads = []
+
+        def fake_post(_self, _path, payload):
+            payloads.append(payload)
+            return {"model": "llm-test", "choices": [{"message": {"content": "{}"}}]}
+
+        provider = OpenAICompatibleProvider(base_url="https://example.test/v1", api_key="key", model="llm-test")
+        with patch.object(OpenAICompatibleProvider, "_post_json", fake_post):
+            provider.chat([], response_format={"type": "json_object"})
+
+        self.assertEqual(payloads[0]["response_format"], {"type": "json_object"})
+
 
 if __name__ == "__main__":
     unittest.main()
