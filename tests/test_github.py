@@ -54,6 +54,10 @@ class GitHubCommentTest(unittest.TestCase):
 - **Severity**: P1
 - **Reasoning**: The handler continues after writing an error response.
 - **Recommendation**: Return immediately after the error response.
+
+```go
+return
+```
 """
 
         comments = build_inline_review_comments("code-rules", body, Path("/repo"))
@@ -64,6 +68,11 @@ class GitHubCommentTest(unittest.TestCase):
         self.assertIn("GO-DEMO-001", comments[0].body)
         self.assertIn("thin-http-handlers", comments[0].body)
         self.assertIn("P1", comments[0].body)
+        self.assertIn("### [Missing return after decode error](#thin-http-handlers)", comments[0].body)
+        self.assertIn("**Reasoning**", comments[0].body)
+        self.assertIn("> The handler continues after writing an error response.", comments[0].body)
+        self.assertIn("## Recommendation", comments[0].body)
+        self.assertIn("```go\nreturn\n```", comments[0].body)
         self.assertTrue(comments[0].marker.startswith("<!-- code-review-agent-inline:code-rules:"))
 
     def test_build_inline_review_comments_dedupes_nearby_same_rule(self) -> None:
@@ -83,7 +92,7 @@ class GitHubCommentTest(unittest.TestCase):
         self.assertEqual(len(comments), 1)
         self.assertEqual(comments[0].line, 114)
 
-    def test_publish_inline_comments_filters_to_changed_lines_and_skips_existing(self) -> None:
+    def test_publish_inline_comments_updates_existing_and_filters_to_changed_lines(self) -> None:
         calls: list[tuple[str, str, dict | None]] = []
         commenter = GitHubPullRequestCommenter(_context())
         comments = build_inline_review_comments(
@@ -105,7 +114,7 @@ class GitHubCommentTest(unittest.TestCase):
 """,
             Path("/repo"),
         )
-        existing = [{"body": comments[0].marker}]
+        existing = [{"body": comments[0].marker, "url": "https://api.github.test/pulls/comments/123"}]
         files = [
             {
                 "filename": "demo/foo.go",
@@ -113,13 +122,18 @@ class GitHubCommentTest(unittest.TestCase):
             }
         ]
 
-        with patch("code_review_agent.github.request.urlopen", side_effect=_fake_urlopen(calls, [files, existing])):
+        with patch("code_review_agent.github.request.urlopen", side_effect=_fake_urlopen(calls, [files, [], existing, []])):
             count = commenter.publish_inline_comments(comments)
 
-        self.assertEqual(count, 1)
+        self.assertEqual(count, 2)
+        patch_calls = [call for call in calls if call[0] == "PATCH"]
         post_calls = [call for call in calls if call[0] == "POST"]
+        self.assertEqual(len(patch_calls), 1)
+        self.assertEqual(patch_calls[0][1], "https://api.github.test/pulls/comments/123")
+        self.assertIn("[View changed line]", patch_calls[0][2]["body"])
         self.assertEqual(len(post_calls), 1)
         self.assertEqual(post_calls[0][1], "https://api.github.test/repos/owner/repo/pulls/7/comments")
+        self.assertIn("[View changed line](https://github.example/owner/repo/blob/abc123/demo/foo.go#L3)", post_calls[0][2]["body"])
         self.assertEqual(post_calls[0][2]["commit_id"], "abc123")
         self.assertEqual(post_calls[0][2]["path"], "demo/foo.go")
         self.assertEqual(post_calls[0][2]["line"], 3)
@@ -133,6 +147,7 @@ def _context() -> GitHubContext:
         pull_request_number=7,
         head_sha="abc123",
         api_url="https://api.github.test",
+        server_url="https://github.example",
     )
 
 
