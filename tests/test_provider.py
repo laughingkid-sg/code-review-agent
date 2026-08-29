@@ -19,6 +19,7 @@ class ProviderConfigTest(unittest.TestCase):
 OPENAI_BASE_URL="https://example.test/v1"
 OPENAI_API_KEY=file-key
 OPENAI_MODEL='llm-test'
+OPENAI_EXTRA_BODY_JSON='{"enable_thinking": false}'
 """,
                 encoding="utf-8",
             )
@@ -29,6 +30,7 @@ OPENAI_MODEL='llm-test'
                 self.assertEqual(os.environ["OPENAI_BASE_URL"], "https://example.test/v1")
                 self.assertEqual(os.environ["OPENAI_API_KEY"], "existing-key")
                 self.assertEqual(os.environ["OPENAI_MODEL"], "llm-test")
+                self.assertEqual(os.environ["OPENAI_EXTRA_BODY_JSON"], '{"enable_thinking": false}')
 
     def test_openai_compatible_provider_requires_env_values(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
@@ -50,6 +52,35 @@ OPENAI_MODEL='llm-test'
 
         self.assertEqual(provider.response_format_mode, "json_object")
 
+    def test_openai_compatible_provider_reads_extra_body_json(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_BASE_URL": "https://example.test/v1",
+                "OPENAI_API_KEY": "key",
+                "OPENAI_MODEL": "llm-test",
+                "OPENAI_EXTRA_BODY_JSON": '{"enable_thinking": false}',
+            },
+            clear=True,
+        ):
+            provider = OpenAICompatibleProvider.from_env()
+
+        self.assertEqual(provider.extra_body, {"enable_thinking": False})
+
+    def test_openai_compatible_provider_rejects_invalid_extra_body_json(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_BASE_URL": "https://example.test/v1",
+                "OPENAI_API_KEY": "key",
+                "OPENAI_MODEL": "llm-test",
+                "OPENAI_EXTRA_BODY_JSON": "[]",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ProviderError, "OPENAI_EXTRA_BODY_JSON"):
+                OpenAICompatibleProvider.from_env()
+
     def test_openai_compatible_provider_rejects_invalid_response_format_mode(self) -> None:
         with patch.dict(
             os.environ,
@@ -66,7 +97,12 @@ OPENAI_MODEL='llm-test'
 
     def test_chat_can_request_json_object_response_format(self) -> None:
         client = _FakeClient()
-        provider = OpenAICompatibleProvider(base_url="https://example.test/v1", api_key="key", model="llm-test")
+        provider = OpenAICompatibleProvider(
+            base_url="https://example.test/v1",
+            api_key="key",
+            model="llm-test",
+            extra_body={"enable_thinking": False},
+        )
         with patch.object(OpenAICompatibleProvider, "_client", return_value=client):
             result = provider.chat(
                 [ChatMessage(role="user", content="Return JSON.")],
@@ -88,6 +124,7 @@ OPENAI_MODEL='llm-test'
                     "max_tokens": 44,
                     "top_p": 1,
                     "response_format": {"type": "json_object"},
+                    "extra_body": {"enable_thinking": False},
                 }
             ],
         )

@@ -125,6 +125,7 @@ The current demo uses the official OpenAI Python SDK against an OpenAI-compatibl
 - `OPENAI_BASE_URL`: OpenAI-compatible base URL.
 - `OPENAI_MODEL`: model name.
 - `OPENAI_RESPONSE_FORMAT`: optional review finding format; defaults to `json_schema` for Structured Outputs. Use `json_object` for compatible providers or models that do not support strict JSON schema outputs.
+- `OPENAI_EXTRA_BODY_JSON`: optional JSON object passed through the OpenAI Python SDK as `extra_body` for provider-specific extensions, such as disabling Qwen thinking mode in CI.
 - `GITHUB_TOKEN`: provided by GitHub Actions for PR metadata and comments.
 
 ## Findings and Comments
