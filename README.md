@@ -1,62 +1,119 @@
 # Code Review Agent
 
-Reusable Python agent and GitHub Action for the intelligent code review demo.
+Reusable Python agent and composite GitHub Action for the intelligent code review demo.
 
-The agent reviews pull request changes after a developer opens a PR or pushes new commits to an existing PR. It does not create the PR. It reads repository configuration, PRD/TD documents, changed files, and markdown rules from the knowledgebase, then produces review artifacts and later PR comments.
+The agent runs after a developer opens a pull request or pushes new commits to an existing pull request. It does not create PRs. It reads repository configuration, changed files, PRD/TDD documents, and markdown rules, then writes review artifacts and publishes managed GitHub PR comments.
 
-## Responsibilities
+## Repository Role
 
-- Load target repository config from `.code-review.yml`.
-- Read pull request diffs and changed files.
-- Load markdown rules from `code-review-knowledgebase`.
-- Preserve contributor metadata in full rule records and keep review payloads compact for model calls.
-- Generate PR-specific PRD/TD summaries as CI artifacts in the implementation repository run.
-- Run code-rule review and business-rule review as separate jobs so they can execute in parallel.
-- Publish GitHub PR comments after dry-run output is approved.
+- Own executable review logic shared by implementation repositories.
+- Provide the composite GitHub Action contract in `action.yml`.
+- Run code-rule, business-rule, and aggregate review modes.
+- Keep full rule records for reporting while sending compact payloads to the LLM.
+- Write provider request/response transcripts to `output/`.
+- Publish managed summary comments and exact-line inline PR review comments.
 
 ## Non-Responsibilities
 
-- Store PRD or TD summaries in the knowledgebase.
-- Own product or technical requirement source documents.
+- Store coding rules. Those live in `code-review-knowledgebase`.
+- Store PRD/TDD summaries permanently. Those are generated in implementation repo CI artifacts.
 - Replace manual developer PR creation.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  Action[action.yml composite action] --> CLI[cli.py]
+  CLI --> Config[config.py]
+  CLI --> Skills[skills package]
+  Skills --> CodeSkill[code_rules skill]
+  Skills --> BizSkill[business_rules skill]
+  Skills --> AggSkill[aggregation skill]
+  Skills --> CommentSkill[github_comments skill]
+  CodeSkill --> Rules[rules.py compact KB payload]
+  BizSkill --> Docs[documents.py PRD/TDD summaries]
+  CodeSkill --> Provider[providers.py OpenAI-compatible Qwen]
+  BizSkill --> Provider
+  Provider --> Findings[findings.py structured finding parser]
+  Findings --> CommentSkill
+  CommentSkill --> GitHub[github.py PR comments and stale cleanup]
+  Provider --> Audit[audit.py transcripts]
+```
+
+## Review Flow
+
+```mermaid
+sequenceDiagram
+  participant Workflow as GitHub workflow
+  participant CLI as code_review_agent CLI
+  participant Skill as Review skill
+  participant LLM as Qwen compatible API
+  participant GH as GitHub API
+  Workflow->>CLI: Run mode with config, changed files, and output path
+  CLI->>Skill: Dispatch to code, business, or aggregate skill
+  Skill->>LLM: Send review context when provider is enabled
+  LLM-->>Skill: Return findings with corrected snippets
+  Skill->>CLI: Write markdown artifact
+  CLI->>GH: Post/update managed summary comment
+  CLI->>GH: Post/update inline comments for code/business findings
+  CLI->>GH: Delete stale generated inline comments for that mode
+```
 
 ## Modes
 
-- `code-rules`: applies markdown knowledgebase rules to changed code.
-- `business-rules`: summarizes PRD/TD documents and compares implementation behavior against requirements.
-- `aggregate`: combines review artifacts into a single report or PR comment.
+| Mode | Purpose | Inline comments |
+| --- | --- | --- |
+| `code-rules` | Review changed code against markdown coding rules from the knowledgebase. | Yes |
+| `business-rules` | Summarize affected PRD/TDD documents and review implementation logic against them. | Yes |
+| `aggregate` | Combine code-rule and business-rule artifacts into a final PR summary. | No, summary only |
 
-## Rule Payloads
+## Action Inputs
 
-The agent keeps full rule metadata for reports and future governance, then builds a compact rule payload for model review. The compact payload keeps `ID`, `Slug`, `Severity`, and check-relevant rule sections. It excludes `Contributor`, `Tags`, and `References` to reduce tokens sent to the model.
+| Input | Purpose |
+| --- | --- |
+| `mode` | `code-rules`, `business-rules`, or `aggregate`. |
+| `config-path` | Target repo `.code-review.yml`. |
+| `repository-path` | Target implementation repository checkout path. |
+| `knowledgebase-path` | Checked-out `code-review-knowledgebase` path. |
+| `output-path` | Markdown artifact to write. |
+| `provider` | `mock` or `qwen`. |
+| `comment-mode` | `dry_run` or `pr_comment`. |
+| `changed-files` | Newline-separated changed file paths. |
+| `audit-dir` | Directory for provider transcripts. |
+| `summary-cache-ttl-days` | Freshness window for PRD/TDD summary cache. |
+| `aggregate-inputs` | Newline-separated artifacts to combine in aggregate mode. |
+| `pull-request-number` | PR number override for non-PR events such as `workflow_run`. |
+| `head-sha` | Head SHA override for non-PR events such as `workflow_run`. |
 
-## Required Secrets
+## Provider Configuration
 
-- `DASHSCOPE_API_KEY`: Qwen/DashScope API key for LLM review.
+The current demo uses Alibaba Model Studio through an OpenAI-compatible API endpoint.
+
+- `OPENAI_API_KEY`: required provider key.
+- `OPENAI_BASE_URL`: OpenAI-compatible base URL.
+- `OPENAI_MODEL`: model name.
 - `GITHUB_TOKEN`: provided by GitHub Actions for PR metadata and comments.
-- `KNOWLEDGEBASE_REPO_TOKEN`: optional, only needed if the knowledgebase repo is private and cannot be checked out with the default token.
 
-## Local Dry-Run
+## Findings and Comments
 
-Run from a local checkout:
+The agent parses model output into structured `ReviewFinding` records before rendering comments. The parser supports current markdown findings and future fenced JSON findings.
 
-```bash
-PYTHONPATH=src python -m code_review_agent run \
-  --mode code-rules \
-  --config .code-review.yml \
-  --repository ../code-review-demo \
-  --knowledgebase ../code-review-knowledgebase \
-  --default-contributor codex \
-  --output .code-review/artifacts/code-rules-review.md
-```
+Inline comments include:
 
-For business-rule dry-runs:
+- linked finding title using the rule slug when available.
+- `RuleID` and `Severity`.
+- quoted reasoning.
+- recommendation.
+- corrected fenced code snippet when the model provides one.
+- direct link to the changed line.
 
-```bash
-PYTHONPATH=src python -m code_review_agent run \
-  --mode business-rules \
-  --config .code-review.yml \
-  --repository ../code-review-demo \
-  --knowledgebase ../code-review-knowledgebase \
-  --output .code-review/artifacts/business-rules-review.md
-```
+Generated inline comments include hidden markers. On rerun, the agent updates matching generated comments and deletes stale generated comments for the same review mode.
+
+## Future Improvements
+
+- Prefer provider-native structured JSON output for all findings.
+- Export machine-readable finding lifecycle events to an external Hive table.
+- Analyze rule effectiveness, false positives, resolved findings, unresolved findings, consumption rate, and non-consumption rate from Hive.
+- Add richer aggregation that clusters duplicate code-rule and business-rule findings.
+- Add integrations for Slack, Lark, or Teams notifications after review completion.
+- Package the internal skill modules as externally reusable Codex skills if local developer workflows become a requirement.
