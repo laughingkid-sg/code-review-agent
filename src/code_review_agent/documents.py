@@ -31,10 +31,8 @@ def affected_document_sets(document_sets: tuple[DocumentSet, ...], changed_files
 
 
 def write_document_summary(document_set: DocumentSet, output_dir: Path) -> DocumentSummary:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{document_set.id}-prd-td-summary.md"
-    missing_paths = tuple(path for path in (document_set.prd_path, document_set.td_path) if not path.exists())
-    headings = _collect_headings(document_set.prd_path) + _collect_headings(document_set.td_path)
+    summary = build_document_summary(document_set, output_dir)
+    summary.output_path.parent.mkdir(parents=True, exist_ok=True)
 
     lines = [
         f"# PRD/TD Summary - {document_set.name}",
@@ -49,16 +47,23 @@ def write_document_summary(document_set: DocumentSet, output_dir: Path) -> Docum
         "## Extracted Headings",
         "",
     ]
-    if headings:
-        lines.extend(f"- {heading}" for heading in headings)
+    if summary.headings:
+        lines.extend(f"- {heading}" for heading in summary.headings)
     else:
         lines.append("- No markdown headings found.")
-    if missing_paths:
+    if summary.missing_paths:
         lines.extend(["", "## Missing Documents", ""])
-        lines.extend(f"- `{path}`" for path in missing_paths)
+        lines.extend(f"- `{path}`" for path in summary.missing_paths)
     lines.append("")
 
-    output_path.write_text("\n".join(lines), encoding="utf-8")
+    summary.output_path.write_text("\n".join(lines), encoding="utf-8")
+    return summary
+
+
+def build_document_summary(document_set: DocumentSet, output_dir: Path) -> DocumentSummary:
+    output_path = output_dir / f"{document_set.id}-prd-td-summary.md"
+    missing_paths = tuple(path for path in (document_set.prd_path, document_set.td_path) if not path.exists())
+    headings = _collect_headings(document_set.prd_path) + _collect_headings(document_set.td_path)
     return DocumentSummary(document_set=document_set, output_path=output_path, headings=headings, missing_paths=missing_paths)
 
 

@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import time
 
 from .audit import AuditRecorder
-from .config import ReviewConfig
-from .documents import DocumentSummary, affected_document_sets, write_document_summary
+from .config import DocumentSet, ReviewConfig
+from .documents import DocumentSummary, affected_document_sets, build_document_summary, write_document_summary
 from .providers import ChatMessage, OpenAICompatibleProvider
 from .rules import Rule, compact_review_payload
 
@@ -90,14 +91,16 @@ def run_business_rules(
     output_path: Path,
     provider: OpenAICompatibleProvider | None = None,
     audit_recorder: AuditRecorder | None = None,
+    summary_cache_ttl_days: int = 3,
 ) -> None:
     document_sets = affected_document_sets(config.document_sets, changed_files)
-    summaries = tuple(write_document_summary(document_set, config.summary_artifact_dir) for document_set in document_sets)
+    summaries = tuple(
+        _prepare_summary(document_set, config, provider, audit_recorder, summary_cache_ttl_days)
+        for document_set in document_sets
+    )
     provider_reviews: list[str] = []
     if provider:
         for summary in summaries:
-            provider_summary = _provider_document_summary(summary, provider, audit_recorder)
-            summary.output_path.write_text(provider_summary, encoding="utf-8")
             provider_reviews.append(_provider_business_review(config, summary, changed_files, provider, audit_recorder))
     lines = [
         "# Business Rules Review",
@@ -119,6 +122,38 @@ def run_business_rules(
         for provider_review in provider_reviews:
             lines.extend([provider_review, ""])
     _write_output(output_path, lines)
+
+
+def _prepare_summary(
+    document_set: DocumentSet,
+    config: ReviewConfig,
+    provider: OpenAICompatibleProvider | None,
+    audit_recorder: AuditRecorder | None,
+    summary_cache_ttl_days: int,
+) -> DocumentSummary:
+    if not provider:
+        return write_document_summary(document_set, config.summary_artifact_dir)
+
+    summary = build_document_summary(document_set, config.summary_artifact_dir)
+    if _cached_summary_is_fresh(summary, summary_cache_ttl_days):
+        return summary
+
+    provider_summary = _provider_document_summary(summary, provider, audit_recorder)
+    summary.output_path.parent.mkdir(parents=True, exist_ok=True)
+    summary.output_path.write_text(provider_summary, encoding="utf-8")
+    return summary
+
+
+def _cached_summary_is_fresh(summary: DocumentSummary, ttl_days: int) -> bool:
+    if ttl_days <= 0 or not summary.output_path.exists():
+        return False
+
+    summary_mtime = summary.output_path.stat().st_mtime
+    if time.time() - summary_mtime > ttl_days * 24 * 60 * 60:
+        return False
+
+    source_paths = (summary.document_set.prd_path, summary.document_set.td_path)
+    return all(not path.exists() or path.stat().st_mtime <= summary_mtime for path in source_paths)
 
 
 def run_aggregate(output_path: Path) -> None:
