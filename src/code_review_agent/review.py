@@ -17,6 +17,7 @@ from .findings import (
 )
 from .providers import ChatMessage, OpenAICompatibleProvider
 from .rules import Rule, compact_review_payload
+from .skill_prompts import EMPTY_SKILL_PROMPTS, SkillPromptBundle
 
 
 @dataclass(frozen=True)
@@ -40,10 +41,11 @@ def run_code_rules(
     default_contributor: str,
     provider: OpenAICompatibleProvider | None = None,
     audit_recorder: AuditRecorder | None = None,
+    skill_prompts: SkillPromptBundle = EMPTY_SKILL_PROMPTS,
 ) -> None:
     files = _review_files(config, repository_path, changed_files)
     findings = _heuristic_findings(rules, files)
-    provider_review = _provider_code_review(config, rules, repository_path, files, provider, audit_recorder)
+    provider_review = _provider_code_review(config, rules, repository_path, files, provider, audit_recorder, skill_prompts)
     lines = [
         "# Code Rules Review",
         "",
@@ -65,6 +67,8 @@ def run_code_rules(
         lines.extend(f"- `{path}`" for path in files)
     else:
         lines.append("- No Go files selected for review.")
+
+    lines.extend(_enabled_skill_lines(skill_prompts))
 
     if provider_review:
         lines.extend(["", "## Provider Review", "", provider_review, ""])
@@ -100,16 +104,19 @@ def run_business_rules(
     provider: OpenAICompatibleProvider | None = None,
     audit_recorder: AuditRecorder | None = None,
     summary_cache_ttl_days: int = 3,
+    skill_prompts: SkillPromptBundle = EMPTY_SKILL_PROMPTS,
 ) -> None:
     document_sets = affected_document_sets(config.document_sets, changed_files)
     summaries = tuple(
-        _prepare_summary(document_set, config, provider, audit_recorder, summary_cache_ttl_days)
+        _prepare_summary(document_set, config, provider, audit_recorder, summary_cache_ttl_days, skill_prompts)
         for document_set in document_sets
     )
     provider_reviews: list[str] = []
     if provider:
         for summary in summaries:
-            provider_reviews.append(_provider_business_review(config, repository_path, summary, changed_files, provider, audit_recorder))
+            provider_reviews.append(
+                _provider_business_review(config, repository_path, summary, changed_files, provider, audit_recorder, skill_prompts)
+            )
     lines = [
         "# Business Rules Review",
         "",
@@ -125,6 +132,7 @@ def run_business_rules(
             lines.extend(_summary_lines(summary))
     else:
         lines.append("- No affected document sets detected.")
+    lines.extend(_enabled_skill_lines(skill_prompts))
     if provider_reviews:
         lines.extend(["", "## Provider Review", ""])
         for provider_review in provider_reviews:
@@ -138,6 +146,7 @@ def _prepare_summary(
     provider: OpenAICompatibleProvider | None,
     audit_recorder: AuditRecorder | None,
     summary_cache_ttl_days: int,
+    skill_prompts: SkillPromptBundle,
 ) -> DocumentSummary:
     if not provider:
         return write_document_summary(document_set, config.summary_artifact_dir)
@@ -146,7 +155,7 @@ def _prepare_summary(
     if _cached_summary_is_fresh(summary, summary_cache_ttl_days):
         return summary
 
-    provider_summary = _provider_document_summary(summary, provider, audit_recorder)
+    provider_summary = _provider_document_summary(summary, provider, audit_recorder, skill_prompts)
     summary.output_path.parent.mkdir(parents=True, exist_ok=True)
     summary.output_path.write_text(provider_summary, encoding="utf-8")
     return summary
@@ -224,6 +233,7 @@ def _provider_code_review(
     files: tuple[Path, ...],
     provider: OpenAICompatibleProvider | None,
     audit_recorder: AuditRecorder | None,
+    skill_prompts: SkillPromptBundle,
 ) -> str:
     if not provider:
         return ""
@@ -236,10 +246,13 @@ def _provider_code_review(
     messages = [
         ChatMessage(
             role="system",
-            content=(
-                "You are a CI code review agent. Report only actionable issues directly supported by the supplied code "
-                "and rules. Use exact repository-relative paths and exact line numbers from the numbered file excerpts. "
-                "Do not speculate; return no findings when the evidence is insufficient."
+            content=_system_prompt(
+                (
+                    "You are a CI code review agent. Report only actionable issues directly supported by the supplied code "
+                    "and rules. Use exact repository-relative paths and exact line numbers from the numbered file excerpts. "
+                    "Do not speculate; return no findings when the evidence is insufficient."
+                ),
+                skill_prompts,
             ),
         ),
         ChatMessage(
@@ -279,10 +292,14 @@ def _provider_document_summary(
     summary: DocumentSummary,
     provider: OpenAICompatibleProvider,
     audit_recorder: AuditRecorder | None,
+    skill_prompts: SkillPromptBundle,
 ) -> str:
     document_set = summary.document_set
     messages = [
-        ChatMessage(role="system", content="You summarize PRD/TD documents for code review. Return markdown only."),
+        ChatMessage(
+            role="system",
+            content=_system_prompt("You summarize PRD/TD documents for code review. Return markdown only.", skill_prompts),
+        ),
         ChatMessage(
             role="user",
             content="\n\n".join(
@@ -311,6 +328,7 @@ def _provider_business_review(
     changed_files: tuple[Path, ...],
     provider: OpenAICompatibleProvider,
     audit_recorder: AuditRecorder | None,
+    skill_prompts: SkillPromptBundle,
 ) -> str:
     document_set = summary.document_set
     files = _business_review_files(document_set.code_paths, changed_files)
@@ -321,10 +339,13 @@ def _provider_business_review(
     messages = [
         ChatMessage(
             role="system",
-            content=(
-                "You are a CI business-logic code review agent. Report only implementation mismatches that are directly "
-                "supported by the PRD/TD summary and supplied code. Use exact repository-relative paths and exact line "
-                "numbers from the numbered file excerpts. Do not speculate; return no findings when the evidence is insufficient."
+            content=_system_prompt(
+                (
+                    "You are a CI business-logic code review agent. Report only implementation mismatches that are directly "
+                    "supported by the PRD/TD summary and supplied code. Use exact repository-relative paths and exact line "
+                    "numbers from the numbered file excerpts. Do not speculate; return no findings when the evidence is insufficient."
+                ),
+                skill_prompts,
             ),
         ),
         ChatMessage(
@@ -406,6 +427,21 @@ def _finding_json_contract(require_rule: bool) -> str:
 
 def _response_format_mode(provider: OpenAICompatibleProvider) -> str:
     return getattr(provider, "response_format_mode", "json_schema")
+
+
+def _system_prompt(base_prompt: str, skill_prompts: SkillPromptBundle) -> str:
+    rendered_skills = skill_prompts.render()
+    if not rendered_skills:
+        return base_prompt
+    return f"{base_prompt}\n\n{rendered_skills}"
+
+
+def _enabled_skill_lines(skill_prompts: SkillPromptBundle) -> list[str]:
+    if not skill_prompts.skills:
+        return []
+    lines = ["", "## Enabled Application SKILLS", ""]
+    lines.extend(f"- `{name}`" for name in skill_prompts.names)
+    return lines
 
 
 def _business_review_files(code_paths: tuple[Path, ...], changed_files: tuple[Path, ...]) -> tuple[Path, ...]:

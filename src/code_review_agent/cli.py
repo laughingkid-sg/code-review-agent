@@ -9,6 +9,7 @@ from .env import load_env_file
 from .github import GitHubError
 from .providers import ChatMessage, OpenAICompatibleProvider, ProviderError
 from .rules import load_rules
+from .skill_prompts import SkillPromptError, load_skill_prompts
 from .skills import aggregation, business_rules, code_rules, github_comments
 
 
@@ -30,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--comment-mode", choices=("dry_run", "pr_comment"), default="dry_run")
     run_parser.add_argument("--summary-cache-ttl-days", type=int, default=3)
     run_parser.add_argument("--aggregate-input", action="append", default=[])
+    run_parser.add_argument("--skill", action="append", default=[])
     run_parser.add_argument("--artifact-link", action="append", default=[])
 
     smoke_parser = subparsers.add_parser("smoke-provider", help="Run a small OpenAI-compatible provider smoke test.")
@@ -54,6 +56,11 @@ def _run(args: argparse.Namespace) -> int:
     aggregate_inputs = tuple(_resolve_path(repository_path, path) for path in args.aggregate_input)
     config = load_config(config_path, repository_path)
     try:
+        skill_prompts = load_skill_prompts(tuple(args.skill) or config.enabled_skills)
+    except SkillPromptError as exc:
+        print(f"Application skill loading failed: {exc}")
+        return 1
+    try:
         provider = _provider_from_args(args, repository_path)
     except ProviderError as exc:
         print(f"Provider configuration failed: {exc}")
@@ -71,6 +78,7 @@ def _run(args: argparse.Namespace) -> int:
             default_contributor=args.default_contributor,
             provider=provider,
             audit_recorder=audit_recorder,
+            skill_prompts=skill_prompts,
         )
     elif args.mode == "business-rules":
         business_rules.run(
@@ -81,6 +89,7 @@ def _run(args: argparse.Namespace) -> int:
             provider=provider,
             audit_recorder=audit_recorder,
             summary_cache_ttl_days=args.summary_cache_ttl_days,
+            skill_prompts=skill_prompts,
         )
     elif args.mode == "aggregate":
         aggregation.run(output_path=output_path, input_paths=aggregate_inputs)

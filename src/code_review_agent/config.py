@@ -22,6 +22,7 @@ class ReviewConfig:
     department: str
     project: str
     languages: tuple[str, ...]
+    enabled_skills: tuple[str, ...]
     knowledge_layers: tuple[str, ...]
     disabled_rules: frozenset[str]
     summary_artifact_dir: Path
@@ -34,6 +35,7 @@ class ReviewConfig:
 def load_config(config_path: Path, repository_path: Path) -> ReviewConfig:
     data = _load_yaml(config_path)
     repository = data.get("repository", {})
+    skills = data.get("skills", {})
     knowledge = data.get("knowledge", {})
     documents = data.get("documents", {})
     reviews = data.get("reviews", {})
@@ -44,6 +46,7 @@ def load_config(config_path: Path, repository_path: Path) -> ReviewConfig:
         department=str(repository.get("department", "")),
         project=str(repository.get("project", "")),
         languages=tuple(str(item) for item in repository.get("languages", [])),
+        enabled_skills=_load_enabled_skills(skills),
         knowledge_layers=tuple(str(item) for item in knowledge.get("layers", [])),
         disabled_rules=frozenset(str(item) for item in knowledge.get("disabled_rules", [])),
         summary_artifact_dir=_repo_path(repository_path, documents.get("summary_artifact_dir", ".code-review/artifacts")),
@@ -68,6 +71,10 @@ def _load_document_sets(repository_path: Path, sets: list[dict[str, Any]]) -> tu
             )
         )
     return tuple(document_sets)
+
+
+def _load_enabled_skills(skills: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(str(item) for item in skills.get("enabled", []))
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

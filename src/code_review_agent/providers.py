@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from typing import Any
 
@@ -29,6 +30,7 @@ class OpenAICompatibleProvider:
     model: str
     timeout_seconds: int = 60
     response_format_mode: str = "json_schema"
+    extra_body: dict[str, Any] | None = None
 
     @classmethod
     def from_env(cls) -> "OpenAICompatibleProvider":
@@ -36,6 +38,7 @@ class OpenAICompatibleProvider:
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
         model = os.environ.get("OPENAI_MODEL", "").strip()
         response_format_mode = os.environ.get("OPENAI_RESPONSE_FORMAT", "json_schema").strip() or "json_schema"
+        extra_body = _extra_body_from_env(os.environ.get("OPENAI_EXTRA_BODY_JSON", ""))
         missing = [
             name
             for name, value in (
@@ -54,6 +57,7 @@ class OpenAICompatibleProvider:
             api_key=api_key,
             model=model,
             response_format_mode=response_format_mode,
+            extra_body=extra_body,
         )
 
     def chat(
@@ -75,6 +79,8 @@ class OpenAICompatibleProvider:
             payload["top_p"] = top_p
         if response_format:
             payload["response_format"] = response_format
+        if self.extra_body:
+            payload["extra_body"] = self.extra_body
 
         try:
             response = self._client().chat.completions.create(**payload)
@@ -100,6 +106,19 @@ class OpenAICompatibleProvider:
         except ImportError as exc:
             raise ProviderError("OpenAI Python SDK is not installed. Install the `openai` package.") from exc
         return OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=self.timeout_seconds)
+
+
+def _extra_body_from_env(raw_value: str) -> dict[str, Any] | None:
+    value = raw_value.strip()
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ProviderError("OPENAI_EXTRA_BODY_JSON must be a valid JSON object.") from exc
+    if not isinstance(parsed, dict):
+        raise ProviderError("OPENAI_EXTRA_BODY_JSON must be a valid JSON object.")
+    return parsed
 
 
 def _get_value(value: Any, key: str) -> Any:

@@ -6,6 +6,7 @@ from ..audit import AuditRecorder
 from ..config import ReviewConfig
 from ..providers import OpenAICompatibleProvider
 from ..review import run_business_rules
+from ..skill_prompts import EMPTY_SKILL_PROMPTS, SkillPromptBundle
 
 
 def run(
@@ -17,6 +18,7 @@ def run(
     provider: OpenAICompatibleProvider | None,
     audit_recorder: AuditRecorder | None,
     summary_cache_ttl_days: int,
+    skill_prompts: SkillPromptBundle = EMPTY_SKILL_PROMPTS,
 ) -> None:
     run_business_rules(
         config=config,
@@ -26,4 +28,5 @@ def run(
         provider=provider,
         audit_recorder=audit_recorder,
         summary_cache_ttl_days=summary_cache_ttl_days,
+        skill_prompts=skill_prompts,
     )
