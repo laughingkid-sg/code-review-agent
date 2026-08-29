@@ -6,16 +6,10 @@ from pathlib import Path
 from .audit import AuditRecorder
 from .config import load_config
 from .env import load_env_file
-from .github import (
-    GitHubContext,
-    GitHubError,
-    GitHubPullRequestCommenter,
-    build_inline_review_comments,
-    build_review_comment,
-)
+from .github import GitHubError
 from .providers import ChatMessage, OpenAICompatibleProvider, ProviderError
-from .review import run_aggregate, run_business_rules, run_code_rules
 from .rules import load_rules
+from .skills import aggregation, business_rules, code_rules, github_comments
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -35,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--audit-dir", default="output")
     run_parser.add_argument("--comment-mode", choices=("dry_run", "pr_comment"), default="dry_run")
     run_parser.add_argument("--summary-cache-ttl-days", type=int, default=3)
+    run_parser.add_argument("--aggregate-input", action="append", default=[])
 
     smoke_parser = subparsers.add_parser("smoke-provider", help="Run a small OpenAI-compatible provider smoke test.")
     smoke_parser.add_argument("--env-file", default=".env")
@@ -55,6 +50,7 @@ def _run(args: argparse.Namespace) -> int:
     knowledgebase_path = Path(args.knowledgebase).resolve()
     output_path = _resolve_path(repository_path, args.output)
     changed_files = tuple(_resolve_path(repository_path, path) for path in args.changed_file)
+    aggregate_inputs = tuple(_resolve_path(repository_path, path) for path in args.aggregate_input)
     config = load_config(config_path, repository_path)
     try:
         provider = _provider_from_args(args, repository_path)
@@ -65,7 +61,7 @@ def _run(args: argparse.Namespace) -> int:
 
     if args.mode == "code-rules":
         rules = load_rules(knowledgebase_path, config.knowledge_layers, config.disabled_rules)
-        run_code_rules(
+        code_rules.run(
             config=config,
             rules=rules,
             repository_path=repository_path,
@@ -76,7 +72,7 @@ def _run(args: argparse.Namespace) -> int:
             audit_recorder=audit_recorder,
         )
     elif args.mode == "business-rules":
-        run_business_rules(
+        business_rules.run(
             config=config,
             changed_files=changed_files,
             output_path=output_path,
@@ -85,9 +81,14 @@ def _run(args: argparse.Namespace) -> int:
             summary_cache_ttl_days=args.summary_cache_ttl_days,
         )
     elif args.mode == "aggregate":
-        run_aggregate(output_path=output_path)
+        aggregation.run(output_path=output_path, input_paths=aggregate_inputs)
     try:
-        _publish_comment(args, output_path, repository_path)
+        github_comments.publish(
+            mode=args.mode,
+            output_path=output_path,
+            repository_path=repository_path,
+            comment_mode=args.comment_mode,
+        )
     except GitHubError as exc:
         print(f"GitHub comment publishing failed: {exc}")
         return 1
@@ -106,19 +107,6 @@ def _provider_from_args(args: argparse.Namespace, repository_path: Path) -> Open
         return None
     load_env_file(_resolve_path(repository_path, args.env_file))
     return OpenAICompatibleProvider.from_env()
-
-
-def _publish_comment(args: argparse.Namespace, output_path: Path, repository_path: Path) -> None:
-    if args.comment_mode == "dry_run":
-        return
-    body = output_path.read_text(encoding="utf-8")
-    marker, comment = build_review_comment(args.mode, output_path, body)
-    commenter = GitHubPullRequestCommenter(GitHubContext.from_env())
-    result = commenter.publish(marker, comment)
-    print(f"GitHub PR comment {result}.")
-    inline_comments = build_inline_review_comments(args.mode, body, repository_path)
-    inline_count = commenter.publish_inline_comments(inline_comments)
-    print(f"GitHub inline PR comments created/updated: {inline_count}.")
 
 
 def _smoke_provider(args: argparse.Namespace) -> int:
