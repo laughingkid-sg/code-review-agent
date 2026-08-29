@@ -6,9 +6,9 @@ The agent runs after a developer opens a pull request or pushes new commits to a
 
 ## References
 
-1. Agent / GitHub Action - [https://github.com/laughingkid-sg/code-review-agent](https://github.com/laughingkid-sg/code-review-agent)
-2. Implementation Example - [https://github.com/laughingkid-sg/code-review-demo](https://github.com/laughingkid-sg/code-review-demo)
-3. Knowledge Base Example - [https://github.com/laughingkid-sg/code-review-knowledgebase](https://github.com/laughingkid-sg/code-review-knowledgebase)
+1. [Agent / GitHub Action ](https://github.com/laughingkid-sg/code-review-agent)
+2. [Implementation Example](https://github.com/laughingkid-sg/code-review-demo)
+3. [Knowledge Base Example ](https://github.com/laughingkid-sg/code-review-knowledgebase)
 
 ## Repository Role
 
