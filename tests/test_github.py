@@ -66,6 +66,23 @@ class GitHubCommentTest(unittest.TestCase):
         self.assertIn("P1", comments[0].body)
         self.assertTrue(comments[0].marker.startswith("<!-- code-review-agent-inline:code-rules:"))
 
+    def test_build_inline_review_comments_dedupes_nearby_same_rule(self) -> None:
+        body = """### Decode error can continue
+- File: demo/handler.go
+- Line: 114
+- Slug: stop-after-request-binding-failure
+
+### Missing return after decode error
+- File: demo/handler.go
+- Line: 116
+- Slug: stop-after-request-binding-failure
+"""
+
+        comments = build_inline_review_comments("code-rules", body, Path("/repo"))
+
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0].line, 114)
+
     def test_publish_inline_comments_filters_to_changed_lines_and_skips_existing(self) -> None:
         calls: list[tuple[str, str, dict | None]] = []
         commenter = GitHubPullRequestCommenter(_context())

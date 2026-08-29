@@ -272,14 +272,29 @@ def _inline_marker(mode: str, path: str, line: int, title: str) -> str:
 
 def _dedupe_inline_comments(comments: list[InlineReviewComment]) -> tuple[InlineReviewComment, ...]:
     seen: set[tuple[str, int, str]] = set()
+    nearby_rule_lines: dict[tuple[str, str], list[int]] = {}
     deduped: list[InlineReviewComment] = []
     for comment in comments:
         key = (comment.path, comment.line, comment.body)
         if key in seen:
             continue
+        rule_key = _inline_rule_key(comment)
+        if rule_key:
+            nearby_lines = nearby_rule_lines.setdefault(rule_key, [])
+            if any(abs(comment.line - line) <= 5 for line in nearby_lines):
+                continue
+            nearby_lines.append(comment.line)
         seen.add(key)
         deduped.append(comment)
     return tuple(deduped)
+
+
+def _inline_rule_key(comment: InlineReviewComment) -> tuple[str, str] | None:
+    for field in ("Slug", "Rule ID", "Rule"):
+        match = re.search(rf"^-\s+{re.escape(field)}:\s*(?P<value>.+?)\s*$", comment.body, flags=re.MULTILINE)
+        if match:
+            return (comment.path, match.group("value").strip().lower())
+    return None
 
 
 def _patch_new_lines(patch: str) -> set[int]:
