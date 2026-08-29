@@ -123,9 +123,49 @@ func create() {
 
             self.assertEqual(exit_code, 0)
             self.assertIn("provider finding", output.read_text(encoding="utf-8"))
-            self.assertEqual(provider.response_formats, [{"type": "json_object"}])
+            self.assertEqual(provider.response_formats[0]["type"], "json_schema")
+            self.assertTrue(provider.response_formats[0]["json_schema"]["strict"])
             audit = repo / "output" / "code-rules-review.md"
             self.assertIn("Provider Transcript", audit.read_text(encoding="utf-8"))
+
+    def test_llm_code_rules_can_use_json_object_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "repo"
+            kb = root / "knowledgebase"
+            repo.mkdir()
+            (repo / ".code-review.yml").write_text(_config(), encoding="utf-8")
+            handler = repo / "demo-projects" / "simple-api" / "internal" / "handler"
+            handler.mkdir(parents=True)
+            target = handler / "product.go"
+            target.write_text("package handler\n", encoding="utf-8")
+            rules = kb / "demo" / "demo-project" / "go"
+            rules.mkdir(parents=True)
+            (rules / "RULES.md").write_text(_project_rule(), encoding="utf-8")
+            provider = _FakeProvider(response_format_mode="json_object")
+
+            output = repo / ".code-review" / "artifacts" / "code-rules-review.md"
+            with patch("code_review_agent.cli.OpenAICompatibleProvider.from_env", return_value=provider):
+                exit_code = main(
+                    [
+                        "run",
+                        "--mode",
+                        "code-rules",
+                        "--repository",
+                        str(repo),
+                        "--knowledgebase",
+                        str(kb),
+                        "--output",
+                        str(output),
+                        "--provider",
+                        "llm",
+                        "--changed-file",
+                        str(target),
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(provider.response_formats, [{"type": "json_object"}])
 
     def test_llm_business_rules_reuses_fresh_summary_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -168,7 +208,7 @@ func create() {
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(provider.calls, 1)
-            self.assertEqual(provider.response_formats, [{"type": "json_object"}])
+            self.assertEqual(provider.response_formats[0]["type"], "json_schema")
             self.assertEqual(summary.read_text(encoding="utf-8"), "# Cached Summary\n")
             self.assertFalse((repo / "output" / "business-summary-simple-api.md").exists())
             self.assertTrue((repo / "output" / "business-review-simple-api.md").exists())
@@ -284,9 +324,10 @@ Handlers must stop processing after request binding, JSON decoding, or path/quer
 
 
 class _FakeProvider:
-    def __init__(self) -> None:
+    def __init__(self, response_format_mode: str = "json_schema") -> None:
         self.calls = 0
         self.response_formats = []
+        self.response_format_mode = response_format_mode
 
     def chat(self, *_args, **kwargs) -> ChatResult:
         self.calls += 1

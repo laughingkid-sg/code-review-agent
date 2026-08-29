@@ -92,16 +92,17 @@ The reusable AI Skill lives at `skills/intelligent-code-review/SKILL.md`. It cap
 
 ## Provider Configuration
 
-The current demo uses an OpenAI-compatible LLM provider. Alibaba Model Studio/Qwen is one compatible configuration, not a required architecture choice.
+The current demo uses the official OpenAI Python SDK against an OpenAI-compatible chat completions endpoint. Alibaba Model Studio/Qwen is one compatible configuration through `OPENAI_BASE_URL`, not a required architecture choice.
 
 - `OPENAI_API_KEY`: required provider key.
 - `OPENAI_BASE_URL`: OpenAI-compatible base URL.
 - `OPENAI_MODEL`: model name.
+- `OPENAI_RESPONSE_FORMAT`: optional review finding format; defaults to `json_schema` for Structured Outputs. Use `json_object` for compatible providers or models that do not support strict JSON schema outputs.
 - `GITHUB_TOKEN`: provided by GitHub Actions for PR metadata and comments.
 
 ## Findings and Comments
 
-The agent asks provider-backed reviews for a JSON object with `findings[]`, parses those records into structured `ReviewFinding` values, then renders markdown artifacts and exact-line GitHub comments from the parsed data. Markdown parsing is kept only as a compatibility fallback for older artifacts.
+The agent asks provider-backed reviews for structured `findings[]` output, parses those records into `ReviewFinding` values, then renders markdown artifacts and exact-line GitHub comments from the parsed data. Structured Outputs use `json_schema` by default; `json_object` remains available as a compatibility fallback. Markdown parsing is kept only as a compatibility fallback for older artifacts.
 
 Inline comments include:
 

@@ -2,10 +2,30 @@ from pathlib import Path
 import json
 import unittest
 
-from code_review_agent.findings import ReviewFinding, parse_json_review_findings, parse_review_findings, render_review_findings_markdown
+from code_review_agent.findings import (
+    REVIEW_FINDINGS_JSON_SCHEMA,
+    ReviewFinding,
+    parse_json_review_findings,
+    parse_review_findings,
+    render_review_findings_markdown,
+    review_findings_response_format,
+)
 
 
 class FindingParsingTest(unittest.TestCase):
+    def test_review_findings_response_format_uses_strict_json_schema(self) -> None:
+        response_format = review_findings_response_format()
+
+        self.assertEqual(response_format["type"], "json_schema")
+        self.assertTrue(response_format["json_schema"]["strict"])
+        self.assertIs(response_format["json_schema"]["schema"], REVIEW_FINDINGS_JSON_SCHEMA)
+        finding_schema = REVIEW_FINDINGS_JSON_SCHEMA["properties"]["findings"]["items"]
+        self.assertFalse(finding_schema["additionalProperties"])
+        self.assertIn("corrected_code", finding_schema["required"])
+
+    def test_review_findings_response_format_can_use_json_object_fallback(self) -> None:
+        self.assertEqual(review_findings_response_format("json_object"), {"type": "json_object"})
+
     def test_parse_markdown_findings(self) -> None:
         findings = parse_review_findings(
             """### Missing return

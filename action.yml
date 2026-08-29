@@ -71,7 +71,7 @@ runs:
   steps:
     - name: Install Python dependencies
       shell: bash
-      run: python -m pip install --disable-pip-version-check "certifi>=2024.8.30" "PyYAML>=6.0"
+      run: python -m pip install --disable-pip-version-check "openai>=1.40.0" "PyYAML>=6.0"
 
     - name: Run code review agent
       shell: bash
