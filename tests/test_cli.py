@@ -126,6 +126,51 @@ func create() {
             audit = repo / "output" / "code-rules-review.md"
             self.assertIn("Provider Transcript", audit.read_text(encoding="utf-8"))
 
+    def test_qwen_business_rules_reuses_fresh_summary_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "repo"
+            repo.mkdir()
+            (repo / ".code-review.yml").write_text(_config(), encoding="utf-8")
+            docs = repo / "demo-projects" / "simple-api" / "docs"
+            docs.mkdir(parents=True)
+            (docs / "PRD.md").write_text("# Product Catalog\n", encoding="utf-8")
+            (docs / "TDD.md").write_text("# Technical Design\n", encoding="utf-8")
+            handler = repo / "demo-projects" / "simple-api" / "internal" / "handler"
+            handler.mkdir(parents=True)
+            target = handler / "product.go"
+            target.write_text("package handler\n", encoding="utf-8")
+            summary = repo / ".code-review" / "artifacts" / "simple-api-prd-td-summary.md"
+            summary.parent.mkdir(parents=True)
+            summary.write_text("# Cached Summary\n", encoding="utf-8")
+            provider = _FakeProvider()
+
+            output = repo / ".code-review" / "artifacts" / "business-rules-review.md"
+            with patch("code_review_agent.cli.OpenAICompatibleProvider.from_env", return_value=provider):
+                exit_code = main(
+                    [
+                        "run",
+                        "--mode",
+                        "business-rules",
+                        "--repository",
+                        str(repo),
+                        "--knowledgebase",
+                        str(root / "knowledgebase"),
+                        "--output",
+                        str(output),
+                        "--provider",
+                        "qwen",
+                        "--changed-file",
+                        str(target),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(provider.calls, 1)
+            self.assertEqual(summary.read_text(encoding="utf-8"), "# Cached Summary\n")
+            self.assertFalse((repo / "output" / "business-summary-simple-api.md").exists())
+            self.assertTrue((repo / "output" / "business-review-simple-api.md").exists())
+
 
 def _config() -> str:
     return """version: 1
@@ -178,7 +223,11 @@ Handlers must stop processing after request binding, JSON decoding, or path/quer
 
 
 class _FakeProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def chat(self, *_args, **_kwargs) -> ChatResult:
+        self.calls += 1
         return ChatResult(model="fake-qwen", content="provider finding", usage={"total_tokens": 3})
 
 
