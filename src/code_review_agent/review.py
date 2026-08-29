@@ -156,18 +156,29 @@ def _cached_summary_is_fresh(summary: DocumentSummary, ttl_days: int) -> bool:
     return all(not path.exists() or path.stat().st_mtime <= summary_mtime for path in source_paths)
 
 
-def run_aggregate(output_path: Path) -> None:
-    _write_output(
-        output_path,
-        [
-            "# Aggregated Review",
-            "",
-            "Mode: deterministic dry-run",
-            "",
-            "Aggregation is reserved for combining code-rules and business-rules artifacts after both jobs complete.",
-            "",
-        ],
-    )
+def run_aggregate(output_path: Path, input_paths: tuple[Path, ...] = ()) -> None:
+    lines = [
+        "# Aggregated Review",
+        "",
+        "This summary combines the generated code-rule and business-rule review artifacts for the PR.",
+        "",
+        "## Inputs",
+        "",
+    ]
+    existing_inputs = tuple(path for path in input_paths if path.exists())
+    if existing_inputs:
+        lines.extend(f"- `{path}`" for path in existing_inputs)
+    else:
+        lines.append("- No review artifacts were provided.")
+
+    lines.extend(["", "## Combined Findings", ""])
+    if existing_inputs:
+        for path in existing_inputs:
+            lines.extend([f"### {path.name}", "", _read_text_budget(path, 12000), ""])
+    else:
+        lines.append("No review artifacts were available to aggregate.")
+
+    _write_output(output_path, lines)
 
 
 def _review_files(config: ReviewConfig, repository_path: Path, changed_files: tuple[Path, ...]) -> tuple[Path, ...]:

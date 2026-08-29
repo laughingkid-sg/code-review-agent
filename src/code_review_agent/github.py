@@ -9,6 +9,8 @@ import re
 from typing import Any
 from urllib import error, parse, request
 
+from .findings import ReviewFinding, parse_review_findings
+
 
 class GitHubError(RuntimeError):
     pass
@@ -44,8 +46,8 @@ class GitHubContext:
 
         event = json.loads(Path(event_path).read_text(encoding="utf-8"))
         pull_request = event.get("pull_request") or {}
-        number = pull_request.get("number")
-        head_sha = (pull_request.get("head") or {}).get("sha", "")
+        number = _int_or_none(os.environ.get("CODE_REVIEW_PR_NUMBER")) or pull_request.get("number")
+        head_sha = os.environ.get("CODE_REVIEW_HEAD_SHA", "").strip() or (pull_request.get("head") or {}).get("sha", "")
         if not isinstance(number, int):
             raise GitHubError("GitHub event did not include pull_request.number.")
         if not head_sha:
@@ -61,12 +63,27 @@ class GitHubContext:
         )
 
 
+def _int_or_none(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class InlineReviewComment:
     path: str
     line: int
     marker: str
     body: str
+
+
+@dataclass(frozen=True)
+class InlinePublishResult:
+    created_or_updated: int
+    stale_deleted: int
 
 
 @dataclass(frozen=True)
@@ -82,10 +99,12 @@ class GitHubPullRequestCommenter:
         self._request("POST", self._comments_url(), {"body": comment_body})
         return "created"
 
-    def publish_inline_comments(self, comments: tuple[InlineReviewComment, ...]) -> int:
+    def publish_inline_comments(self, mode: str, comments: tuple[InlineReviewComment, ...]) -> InlinePublishResult:
         valid_lines = self._changed_lines_by_file()
-        existing_comments = self._existing_inline_comments()
-        published = 0
+        existing_comments = self._existing_inline_comments(mode)
+        desired_markers = {comment.marker for comment in comments}
+        created_or_updated = 0
+        stale_deleted = 0
         for comment in comments:
             if comment.line not in valid_lines.get(comment.path, set()):
                 continue
@@ -93,7 +112,7 @@ class GitHubPullRequestCommenter:
             existing = existing_comments.get(comment.marker)
             if existing:
                 self._request("PATCH", existing["url"], {"body": comment_body})
-                published += 1
+                created_or_updated += 1
                 continue
             self._request(
                 "POST",
@@ -106,8 +125,13 @@ class GitHubPullRequestCommenter:
                     "side": "RIGHT",
                 },
             )
-            published += 1
-        return published
+            created_or_updated += 1
+
+        for marker, existing in existing_comments.items():
+            if marker not in desired_markers:
+                self._request("DELETE", existing["url"])
+                stale_deleted += 1
+        return InlinePublishResult(created_or_updated=created_or_updated, stale_deleted=stale_deleted)
 
     def _find_existing_comment(self, marker: str) -> dict[str, Any] | None:
         page = 1
@@ -130,16 +154,17 @@ class GitHubPullRequestCommenter:
     def _files_url(self) -> str:
         return f"{self.context.api_url}/repos/{self.context.repository}/pulls/{self.context.pull_request_number}/files"
 
-    def _existing_inline_comments(self) -> dict[str, dict[str, Any]]:
+    def _existing_inline_comments(self, mode: str) -> dict[str, dict[str, Any]]:
         page = 1
         comments_by_marker: dict[str, dict[str, Any]] = {}
+        marker_re = re.compile(rf"<!-- code-review-agent-inline:{re.escape(mode)}:[^>]+ -->")
         while True:
             url = f"{self._review_comments_url()}?{parse.urlencode({'per_page': 100, 'page': page})}"
             comments = self._request("GET", url)
             if not comments:
                 return comments_by_marker
             for comment in comments:
-                match = re.search(r"<!-- code-review-agent-inline:[^>]+ -->", str(comment.get("body", "")))
+                match = marker_re.search(str(comment.get("body", "")))
                 if match:
                     comments_by_marker[match.group(0)] = comment
             page += 1
@@ -220,15 +245,12 @@ def build_review_comment(mode: str, output_path: Path, body: str) -> tuple[str, 
 
 def build_inline_review_comments(mode: str, body: str, repository_path: Path) -> tuple[InlineReviewComment, ...]:
     comments: list[InlineReviewComment] = []
-    for title, block in _finding_blocks(body):
-        fields = _parse_finding_fields(block)
-        path = _finding_path(fields, repository_path)
-        line = _finding_line(fields)
-        if not path or not line:
+    for finding in parse_review_findings(body, repository_path):
+        if not finding.path or not finding.line:
             continue
-        comment_body = _inline_body(title, fields, _finding_code_block(block))
-        marker = _inline_marker(mode, path, line, title)
-        comments.append(InlineReviewComment(path=path, line=line, marker=marker, body=comment_body))
+        comment_body = _inline_body(finding)
+        marker = _inline_marker(mode, finding.path, finding.line, finding.title)
+        comments.append(InlineReviewComment(path=finding.path, line=finding.line, marker=marker, body=comment_body))
     return tuple(_dedupe_inline_comments(comments))
 
 
@@ -241,86 +263,25 @@ def _mode_title(mode: str) -> str:
     return titles.get(mode, "Code Review")
 
 
-def _finding_blocks(body: str) -> tuple[tuple[str, str], ...]:
-    matches = list(re.finditer(r"^###\s+(?P<title>.+?)\s*$", body, flags=re.MULTILINE))
-    blocks: list[tuple[str, str]] = []
-    for index, match in enumerate(matches):
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
-        blocks.append((match.group("title").strip(), body[start:end].strip()))
-    return tuple(blocks)
-
-
-def _parse_finding_fields(block: str) -> dict[str, str]:
-    fields: dict[str, str] = {}
-    for line in block.splitlines():
-        match = re.match(r"^-\s+(?:\*\*)?(?P<key>[A-Za-z ]+)(?:\*\*)?:\s*(?P<value>.+?)\s*$", line.strip())
-        if not match:
-            continue
-        key = match.group("key").strip().lower().replace(" ", "_")
-        value = match.group("value").strip().strip("`")
-        fields[key] = value
-    return fields
-
-
-def _finding_path(fields: dict[str, str], repository_path: Path) -> str | None:
-    raw_path = fields.get("file")
-    if not raw_path and fields.get("location"):
-        raw_path = fields["location"].rsplit(":", 1)[0]
-    if not raw_path:
-        return None
-
-    path = Path(raw_path.strip("`"))
-    if path.is_absolute():
-        try:
-            return str(path.resolve().relative_to(repository_path.resolve()))
-        except ValueError:
-            return path.name
-    return str(path)
-
-
-def _finding_line(fields: dict[str, str]) -> int | None:
-    raw_line = fields.get("line")
-    if not raw_line and fields.get("location"):
-        raw_line = fields["location"].rsplit(":", 1)[-1]
-    if not raw_line:
-        return None
-    match = re.search(r"\d+", raw_line)
-    return int(match.group(0)) if match else None
-
-
-def _finding_code_block(block: str) -> str:
-    match = re.search(r"```(?P<language>[A-Za-z0-9_-]*)\n(?P<code>.*?)\n```", block, flags=re.DOTALL)
-    if not match:
-        return ""
-    language = match.group("language").strip() or "go"
-    code = match.group("code").strip()
-    return f"```{language}\n{code}\n```" if code else ""
-
-
-def _inline_body(title: str, fields: dict[str, str], code_block: str) -> str:
-    slug = fields.get("slug", "")
-    title_line = f"### [{title}](#{slug})" if slug else f"### {title}"
+def _inline_body(finding: ReviewFinding) -> str:
+    title_line = f"### [{finding.title}](#{finding.slug})" if finding.slug else f"### {finding.title}"
     lines = [title_line, ""]
 
-    rule_id = fields.get("rule_id") or fields.get("rule")
-    if rule_id:
-        lines.extend([f"**RuleID:** `{_strip_code_ticks(rule_id)}`", ""])
+    if finding.rule_id:
+        lines.extend([f"**RuleID:** `{_strip_code_ticks(finding.rule_id)}`", ""])
 
-    severity = fields.get("severity")
-    if severity:
-        lines.extend([f"**Severity:** `{_strip_code_ticks(severity)}`", ""])
+    if finding.severity:
+        lines.extend([f"**Severity:** `{_strip_code_ticks(finding.severity)}`", ""])
 
-    reasoning = fields.get("reasoning")
-    if reasoning:
-        lines.extend(["**Reasoning**", f"> {_strip_code_ticks(reasoning)}", ""])
+    if finding.reasoning:
+        lines.extend(["**Reasoning**", f"> {_strip_code_ticks(finding.reasoning)}", ""])
 
-    recommendation = fields.get("recommendation")
-    if recommendation:
-        lines.extend(["## Recommendation", _strip_code_ticks(recommendation), ""])
+    if finding.recommendation:
+        lines.extend(["## Recommendation", _strip_code_ticks(finding.recommendation), ""])
 
-    if code_block:
-        lines.extend([code_block, ""])
+    if finding.corrected_code:
+        language = finding.language or "go"
+        lines.extend([f"```{language}\n{finding.corrected_code}\n```", ""])
 
     return "\n".join(lines)
 

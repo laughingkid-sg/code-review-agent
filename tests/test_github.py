@@ -1,5 +1,6 @@
-from pathlib import Path
 import json
+import os
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -114,7 +115,12 @@ return
 """,
             Path("/repo"),
         )
-        existing = [{"body": comments[0].marker, "url": "https://api.github.test/pulls/comments/123"}]
+        stale_marker = "<!-- code-review-agent-inline:code-rules:stale -->"
+        existing = [
+            {"body": comments[0].marker, "url": "https://api.github.test/pulls/comments/123"},
+            {"body": stale_marker, "url": "https://api.github.test/pulls/comments/456"},
+            {"body": "<!-- code-review-agent-inline:business-rules:keep -->", "url": "https://api.github.test/pulls/comments/789"},
+        ]
         files = [
             {
                 "filename": "demo/foo.go",
@@ -123,11 +129,13 @@ return
         ]
 
         with patch("code_review_agent.github.request.urlopen", side_effect=_fake_urlopen(calls, [files, [], existing, []])):
-            count = commenter.publish_inline_comments(comments)
+            result = commenter.publish_inline_comments("code-rules", comments)
 
-        self.assertEqual(count, 2)
+        self.assertEqual(result.created_or_updated, 2)
+        self.assertEqual(result.stale_deleted, 1)
         patch_calls = [call for call in calls if call[0] == "PATCH"]
         post_calls = [call for call in calls if call[0] == "POST"]
+        delete_calls = [call for call in calls if call[0] == "DELETE"]
         self.assertEqual(len(patch_calls), 1)
         self.assertEqual(patch_calls[0][1], "https://api.github.test/pulls/comments/123")
         self.assertIn("[View changed line]", patch_calls[0][2]["body"])
@@ -138,6 +146,29 @@ return
         self.assertEqual(post_calls[0][2]["path"], "demo/foo.go")
         self.assertEqual(post_calls[0][2]["line"], 3)
         self.assertEqual(post_calls[0][2]["side"], "RIGHT")
+        self.assertEqual(len(delete_calls), 1)
+        self.assertEqual(delete_calls[0][1], "https://api.github.test/pulls/comments/456")
+
+    def test_context_from_env_accepts_workflow_run_overrides(self) -> None:
+        with tempfile_event({"workflow_run": {"head_sha": "ignored"}}) as event_path:
+            with patch.dict(
+                os.environ,
+                {
+                    "GITHUB_TOKEN": "token",
+                    "GITHUB_REPOSITORY": "owner/repo",
+                    "GITHUB_EVENT_PATH": str(event_path),
+                    "CODE_REVIEW_PR_NUMBER": "42",
+                    "CODE_REVIEW_HEAD_SHA": "def456",
+                    "GITHUB_API_URL": "https://api.github.test",
+                    "GITHUB_SERVER_URL": "https://github.example",
+                },
+                clear=True,
+            ):
+                context = GitHubContext.from_env()
+
+        self.assertEqual(context.pull_request_number, 42)
+        self.assertEqual(context.head_sha, "def456")
+        self.assertEqual(context.server_url, "https://github.example")
 
 
 def _context() -> GitHubContext:
@@ -160,6 +191,25 @@ def _fake_urlopen(calls: list[tuple[str, str, dict | None]], responses: list[obj
         return _Response({"ok": True})
 
     return fake_urlopen
+
+
+class tempfile_event:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self._tmpdir = None
+        self.path = None
+
+    def __enter__(self) -> Path:
+        import tempfile
+
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmpdir.name) / "event.json"
+        self.path.write_text(json.dumps(self.payload), encoding="utf-8")
+        return self.path
+
+    def __exit__(self, *_args) -> None:
+        if self._tmpdir:
+            self._tmpdir.cleanup()
 
 
 class _Response:

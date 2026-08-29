@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import re
+from typing import Any
+
+
+@dataclass(frozen=True)
+class ReviewFinding:
+    title: str
+    severity: str
+    path: str | None
+    line: int | None
+    reasoning: str
+    recommendation: str
+    rule_id: str = ""
+    slug: str = ""
+    corrected_code: str = ""
+    language: str = "go"
+
+
+def parse_review_findings(body: str, repository_path: Path) -> tuple[ReviewFinding, ...]:
+    structured = _parse_json_findings(body, repository_path)
+    if structured:
+        return structured
+    return _parse_markdown_findings(body, repository_path)
+
+
+def _parse_json_findings(body: str, repository_path: Path) -> tuple[ReviewFinding, ...]:
+    payload = _json_payload(body)
+    if payload is None:
+        return ()
+    raw_findings = payload.get("findings") if isinstance(payload, dict) else payload
+    if not isinstance(raw_findings, list):
+        return ()
+
+    findings: list[ReviewFinding] = []
+    for item in raw_findings:
+        if not isinstance(item, dict):
+            continue
+        finding = _finding_from_mapping(item, repository_path)
+        if finding:
+            findings.append(finding)
+    return tuple(findings)
+
+
+def _json_payload(body: str) -> Any:
+    fenced = re.search(r"```json\s*(?P<payload>.*?)\s*```", body, flags=re.DOTALL | re.IGNORECASE)
+    candidate = fenced.group("payload") if fenced else body.strip()
+    if not candidate:
+        return None
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+
+
+def _finding_from_mapping(item: dict[str, Any], repository_path: Path) -> ReviewFinding | None:
+    title = str(item.get("title", "")).strip()
+    path = _normalize_path(str(item.get("file") or item.get("path") or ""), repository_path)
+    line = _line_number(item.get("line"))
+    if not title or not path or not line:
+        return None
+    return ReviewFinding(
+        title=title,
+        rule_id=str(item.get("rule_id") or item.get("rule") or "").strip("` "),
+        slug=str(item.get("slug") or "").strip("` "),
+        severity=str(item.get("severity") or "P3").strip("` "),
+        path=path,
+        line=line,
+        reasoning=str(item.get("reasoning") or "").strip(),
+        recommendation=str(item.get("recommendation") or "").strip(),
+        corrected_code=str(item.get("corrected_code") or item.get("code") or "").strip(),
+        language=str(item.get("language") or "go").strip("` ") or "go",
+    )
+
+
+def _parse_markdown_findings(body: str, repository_path: Path) -> tuple[ReviewFinding, ...]:
+    findings: list[ReviewFinding] = []
+    for title, block in _finding_blocks(body):
+        fields = _parse_finding_fields(block)
+        path = _finding_path(fields, repository_path)
+        line = _finding_line(fields)
+        if not path or not line:
+            continue
+        code_language, code = _finding_code(block)
+        findings.append(
+            ReviewFinding(
+                title=title,
+                rule_id=fields.get("rule_id") or fields.get("rule", ""),
+                slug=fields.get("slug", ""),
+                severity=fields.get("severity", "P3"),
+                path=path,
+                line=line,
+                reasoning=fields.get("reasoning", ""),
+                recommendation=fields.get("recommendation", ""),
+                corrected_code=code,
+                language=code_language,
+            )
+        )
+    return tuple(findings)
+
+
+def _finding_blocks(body: str) -> tuple[tuple[str, str], ...]:
+    matches = list(re.finditer(r"^###\s+(?P<title>.+?)\s*$", body, flags=re.MULTILINE))
+    blocks: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        blocks.append((match.group("title").strip(), body[start:end].strip()))
+    return tuple(blocks)
+
+
+def _parse_finding_fields(block: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in block.splitlines():
+        match = re.match(r"^-\s+(?:\*\*)?(?P<key>[A-Za-z ]+)(?:\*\*)?:\s*(?P<value>.+?)\s*$", line.strip())
+        if not match:
+            continue
+        key = match.group("key").strip().lower().replace(" ", "_")
+        value = match.group("value").strip().strip("`")
+        fields[key] = value
+    return fields
+
+
+def _finding_path(fields: dict[str, str], repository_path: Path) -> str | None:
+    raw_path = fields.get("file")
+    if not raw_path and fields.get("location"):
+        raw_path = fields["location"].rsplit(":", 1)[0]
+    return _normalize_path(raw_path or "", repository_path)
+
+
+def _normalize_path(raw_path: str, repository_path: Path) -> str | None:
+    if not raw_path:
+        return None
+    path = Path(raw_path.strip("`"))
+    if path.is_absolute():
+        try:
+            return str(path.resolve().relative_to(repository_path.resolve()))
+        except ValueError:
+            return path.name
+    return str(path)
+
+
+def _finding_line(fields: dict[str, str]) -> int | None:
+    raw_line = fields.get("line")
+    if not raw_line and fields.get("location"):
+        raw_line = fields["location"].rsplit(":", 1)[-1]
+    return _line_number(raw_line)
+
+
+def _line_number(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if value is None:
+        return None
+    match = re.search(r"\d+", str(value))
+    return int(match.group(0)) if match else None
+
+
+def _finding_code(block: str) -> tuple[str, str]:
+    match = re.search(r"```(?P<language>[A-Za-z0-9_-]*)\n(?P<code>.*?)\n```", block, flags=re.DOTALL)
+    if not match:
+        return ("go", "")
+    return (match.group("language").strip() or "go", match.group("code").strip())

@@ -171,6 +171,41 @@ func create() {
             self.assertFalse((repo / "output" / "business-summary-simple-api.md").exists())
             self.assertTrue((repo / "output" / "business-review-simple-api.md").exists())
 
+    def test_aggregate_combines_input_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "repo"
+            repo.mkdir()
+            (repo / ".code-review.yml").write_text(_config(), encoding="utf-8")
+            code_review = repo / "code-rules-review.md"
+            business_review = repo / "business-rules-review.md"
+            code_review.write_text("# Code\n\n### Code finding\n", encoding="utf-8")
+            business_review.write_text("# Business\n\n### Business finding\n", encoding="utf-8")
+            output = repo / ".code-review" / "artifacts" / "aggregate-review.md"
+
+            exit_code = main(
+                [
+                    "run",
+                    "--mode",
+                    "aggregate",
+                    "--repository",
+                    str(repo),
+                    "--knowledgebase",
+                    str(root / "knowledgebase"),
+                    "--output",
+                    str(output),
+                    "--aggregate-input",
+                    str(code_review),
+                    "--aggregate-input",
+                    str(business_review),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            report = output.read_text(encoding="utf-8")
+            self.assertIn("Code finding", report)
+            self.assertIn("Business finding", report)
+
 
 def _config() -> str:
     return """version: 1

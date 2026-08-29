@@ -44,6 +44,18 @@ inputs:
     description: Number of days a provider-generated PRD/TD summary may be reused.
     required: false
     default: "3"
+  aggregate-inputs:
+    description: Newline-separated review artifact paths to combine in aggregate mode.
+    required: false
+    default: ""
+  pull-request-number:
+    description: Pull request number override for non-pull_request events such as workflow_run.
+    required: false
+    default: ""
+  head-sha:
+    description: Pull request head SHA override for non-pull_request events such as workflow_run.
+    required: false
+    default: ""
 
 outputs:
   review-output:
@@ -62,6 +74,8 @@ runs:
       env:
         PYTHONPATH: ${{ github.action_path }}/src
         GITHUB_TOKEN: ${{ github.token }}
+        CODE_REVIEW_PR_NUMBER: ${{ inputs.pull-request-number }}
+        CODE_REVIEW_HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         args=()
         while IFS= read -r changed_file; do
@@ -69,6 +83,12 @@ runs:
             args+=(--changed-file "$changed_file")
           fi
         done <<< "${{ inputs.changed-files }}"
+        aggregate_args=()
+        while IFS= read -r aggregate_input; do
+          if [ -n "$aggregate_input" ]; then
+            aggregate_args+=(--aggregate-input "$aggregate_input")
+          fi
+        done <<< "${{ inputs.aggregate-inputs }}"
 
         python -m code_review_agent run \
           --mode "${{ inputs.mode }}" \
@@ -81,4 +101,5 @@ runs:
           --comment-mode "${{ inputs.comment-mode }}" \
           --summary-cache-ttl-days "${{ inputs.summary-cache-ttl-days }}" \
           --default-contributor "${{ inputs.default-contributor }}" \
-          "${args[@]}"
+          "${args[@]}" \
+          "${aggregate_args[@]}"
