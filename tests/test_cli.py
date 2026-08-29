@@ -167,6 +167,113 @@ func create() {
         self.assertEqual(exit_code, 0)
         self.assertEqual(provider.response_formats, [{"type": "json_object"}])
 
+    def test_llm_code_rules_includes_enabled_application_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "repo"
+            kb = root / "knowledgebase"
+            repo.mkdir()
+            (repo / ".code-review.yml").write_text(
+                _config(
+                    """
+skills:
+  enabled:
+    - code-review-findings
+    - github-inline-comments
+"""
+                ),
+                encoding="utf-8",
+            )
+            handler = repo / "demo-projects" / "simple-api" / "internal" / "handler"
+            handler.mkdir(parents=True)
+            target = handler / "product.go"
+            target.write_text("package handler\n", encoding="utf-8")
+            rules = kb / "demo" / "demo-project" / "go"
+            rules.mkdir(parents=True)
+            (rules / "RULES.md").write_text(_project_rule(), encoding="utf-8")
+            provider = _FakeProvider()
+
+            output = repo / ".code-review" / "artifacts" / "code-rules-review.md"
+            with patch("code_review_agent.cli.OpenAICompatibleProvider.from_env", return_value=provider):
+                exit_code = main(
+                    [
+                        "run",
+                        "--mode",
+                        "code-rules",
+                        "--repository",
+                        str(repo),
+                        "--knowledgebase",
+                        str(kb),
+                        "--output",
+                        str(output),
+                        "--provider",
+                        "llm",
+                        "--changed-file",
+                        str(target),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            system_prompt = provider.messages[0][0].content
+            self.assertIn("# Enabled Application SKILLS", system_prompt)
+            self.assertIn("## code-review-findings", system_prompt)
+            self.assertIn("## github-inline-comments", system_prompt)
+            report = output.read_text(encoding="utf-8")
+            self.assertIn("## Enabled Application SKILLS", report)
+            self.assertIn("`code-review-findings`", report)
+
+    def test_cli_skill_argument_overrides_config_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "repo"
+            kb = root / "knowledgebase"
+            repo.mkdir()
+            (repo / ".code-review.yml").write_text(
+                _config(
+                    """
+skills:
+  enabled:
+    - business-requirement-tracing
+"""
+                ),
+                encoding="utf-8",
+            )
+            handler = repo / "demo-projects" / "simple-api" / "internal" / "handler"
+            handler.mkdir(parents=True)
+            target = handler / "product.go"
+            target.write_text("package handler\n", encoding="utf-8")
+            rules = kb / "demo" / "demo-project" / "go"
+            rules.mkdir(parents=True)
+            (rules / "RULES.md").write_text(_project_rule(), encoding="utf-8")
+            provider = _FakeProvider()
+
+            output = repo / ".code-review" / "artifacts" / "code-rules-review.md"
+            with patch("code_review_agent.cli.OpenAICompatibleProvider.from_env", return_value=provider):
+                exit_code = main(
+                    [
+                        "run",
+                        "--mode",
+                        "code-rules",
+                        "--repository",
+                        str(repo),
+                        "--knowledgebase",
+                        str(kb),
+                        "--output",
+                        str(output),
+                        "--provider",
+                        "llm",
+                        "--changed-file",
+                        str(target),
+                        "--skill",
+                        "code-review-findings",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            system_prompt = provider.messages[0][0].content
+            self.assertIn("## code-review-findings", system_prompt)
+            self.assertNotIn("## business-requirement-tracing", system_prompt)
+
     def test_llm_business_rules_reuses_fresh_summary_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -273,15 +380,15 @@ func create() {
             self.assertIn("Fix business issue.", report)
 
 
-def _config() -> str:
-    return """version: 1
+def _config(extra: str = "") -> str:
+    return f"""version: 1
 repository:
   name: code-review-demo
   department: demo
   project: demo-project
   languages:
     - go
-knowledge:
+{extra}knowledge:
   layers:
     - demo/demo-project/go
   disabled_rules: []
@@ -327,10 +434,12 @@ class _FakeProvider:
     def __init__(self, response_format_mode: str = "json_schema") -> None:
         self.calls = 0
         self.response_formats = []
+        self.messages = []
         self.response_format_mode = response_format_mode
 
-    def chat(self, *_args, **kwargs) -> ChatResult:
+    def chat(self, messages, **kwargs) -> ChatResult:
         self.calls += 1
+        self.messages.append(messages)
         self.response_formats.append(kwargs.get("response_format"))
         return ChatResult(
             model="fake-llm",

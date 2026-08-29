@@ -7,6 +7,7 @@ from ..config import ReviewConfig
 from ..providers import OpenAICompatibleProvider
 from ..review import run_code_rules
 from ..rules import Rule
+from ..skill_prompts import EMPTY_SKILL_PROMPTS, SkillPromptBundle
 
 
 def run(
@@ -19,6 +20,7 @@ def run(
     default_contributor: str,
     provider: OpenAICompatibleProvider | None,
     audit_recorder: AuditRecorder | None,
+    skill_prompts: SkillPromptBundle = EMPTY_SKILL_PROMPTS,
 ) -> None:
     run_code_rules(
         config=config,
@@ -29,4 +31,5 @@ def run(
         default_contributor=default_contributor,
         provider=provider,
         audit_recorder=audit_recorder,
+        skill_prompts=skill_prompts,
     )

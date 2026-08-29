@@ -25,6 +25,7 @@ The agent runs after a developer opens a pull request or pushes new commits to a
 flowchart TD
   Action[action.yml composite action] --> CLI[cli.py]
   CLI --> Config[config.py]
+  CLI --> AppSkills[skill_prompts.py app SKILLS loader]
   CLI --> Skills[internal Python skills package]
   Skills --> CodeSkill[code_rules module]
   Skills --> BizSkill[business_rules module]
@@ -32,6 +33,7 @@ flowchart TD
   Skills --> CommentSkill[github_comments module]
   CodeSkill --> Rules[rules.py compact KB payload]
   BizSkill --> Docs[documents.py PRD/TDD summaries]
+  AppSkills --> Provider
   CodeSkill --> Provider[providers.py OpenAI-compatible LLM]
   BizSkill --> Provider
   Provider --> Findings[findings.py structured finding parser]
@@ -67,9 +69,33 @@ sequenceDiagram
 | `business-rules` | Summarize affected PRD/TDD documents and review implementation logic against them. | Yes |
 | `aggregate` | Combine code-rule and business-rule artifacts, then publish a lightweight artifact-links comment. | No, artifact links only |
 
-## AI Skill
+## Application SKILLS
 
-The reusable AI Skill lives at `skills/intelligent-code-review/SKILL.md`. It captures the generic review workflow for another Codex run: provider-agnostic LLM setup, markdown knowledge rules, PRD/TD business context, exact-line comments, artifact links, artifacts, and stale generated comment cleanup.
+Application SKILLS are markdown prompt modules loaded by the review agent at runtime and injected into provider prompts. They are not Codex desktop skills and they are not arbitrary executable plugins. Python code performs deterministic work such as reading files, parsing documents, writing artifacts, and publishing comments; SKILLS describe how the LLM should use the prepared context.
+
+Built-in SKILLS live under `src/code_review_agent/app_skills/<name>/SKILLS.md`. Enable them in `.code-review.yml`:
+
+```yaml
+skills:
+  enabled:
+    - code-review-findings
+    - business-requirement-tracing
+    - document-markdown-normalization
+    - github-inline-comments
+```
+
+The composite action also accepts a newline-separated `skills` input. When set, action/CLI skills override `skills.enabled` from config.
+
+Current built-in SKILLS:
+
+| Skill | Purpose |
+| --- | --- |
+| `code-review-findings` | Guides rule-backed code findings toward evidence-only, exact-line comments. |
+| `business-requirement-tracing` | Guides business findings to cite PRD/TD summary requirements or constraints. |
+| `document-markdown-normalization` | Guides use of normalized PRD/TD markdown and incomplete-conversion limitations. |
+| `github-inline-comments` | Guides output toward small, non-duplicative inline PR comments. |
+
+Future document ingestion can add deterministic converters for repo-local PDF or Word PRD/TD files, write normalized markdown artifacts, and then enable `document-markdown-normalization` so the LLM reviews the converted markdown without inventing missing content.
 
 ## Action Inputs
 
@@ -87,6 +113,7 @@ The reusable AI Skill lives at `skills/intelligent-code-review/SKILL.md`. It cap
 | `summary-cache-ttl-days` | Freshness window for PRD/TDD summary cache. |
 | `aggregate-inputs` | Newline-separated artifacts to combine in aggregate mode. |
 | `artifact-links` | Newline-separated `label|url` links for the aggregate artifact-links PR comment. |
+| `skills` | Newline-separated application SKILLS names to inject into provider prompts. Overrides config `skills.enabled` when set. |
 | `pull-request-number` | PR number override for non-PR events such as `workflow_run`. |
 | `head-sha` | Head SHA override for non-PR events such as `workflow_run`. |
 
