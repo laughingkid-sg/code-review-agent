@@ -6,6 +6,7 @@ from pathlib import Path
 from .audit import AuditRecorder
 from .config import load_config
 from .env import load_env_file
+from .github import GitHubContext, GitHubError, GitHubPullRequestCommenter, build_review_comment
 from .providers import ChatMessage, OpenAICompatibleProvider, ProviderError
 from .review import run_aggregate, run_business_rules, run_code_rules
 from .rules import load_rules
@@ -26,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--provider", choices=("mock", "qwen"), default="mock")
     run_parser.add_argument("--env-file", default=".env")
     run_parser.add_argument("--audit-dir", default="output")
+    run_parser.add_argument("--comment-mode", choices=("dry_run", "pr_comment"), default="dry_run")
 
     smoke_parser = subparsers.add_parser("smoke-provider", help="Run a small OpenAI-compatible provider smoke test.")
     smoke_parser.add_argument("--env-file", default=".env")
@@ -76,6 +78,11 @@ def _run(args: argparse.Namespace) -> int:
         )
     elif args.mode == "aggregate":
         run_aggregate(output_path=output_path)
+    try:
+        _publish_comment(args, output_path)
+    except GitHubError as exc:
+        print(f"GitHub comment publishing failed: {exc}")
+        return 1
     return 0
 
 
@@ -91,6 +98,15 @@ def _provider_from_args(args: argparse.Namespace, repository_path: Path) -> Open
         return None
     load_env_file(_resolve_path(repository_path, args.env_file))
     return OpenAICompatibleProvider.from_env()
+
+
+def _publish_comment(args: argparse.Namespace, output_path: Path) -> None:
+    if args.comment_mode == "dry_run":
+        return
+    body = output_path.read_text(encoding="utf-8")
+    marker, comment = build_review_comment(args.mode, output_path, body)
+    result = GitHubPullRequestCommenter(GitHubContext.from_env()).publish(marker, comment)
+    print(f"GitHub PR comment {result}.")
 
 
 def _smoke_provider(args: argparse.Namespace) -> int:
